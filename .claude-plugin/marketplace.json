@@ -1,0 +1,29 @@
+{
+  "name": "worktree-v2-marketplace",
+  "owner": {
+    "name": "Brendan Whitney"
+  },
+  "metadata": {
+    "description": "Personal marketplace for worktree-v2 development",
+    "version": "0.1.0",
+    "pluginRoot": "./plugins"
+  },
+  "plugins": [
+    {
+      "name": "worktree-v2",
+      "source": "./plugins/worktree-v2",
+      "description": "Clean room orchestrator for spawning autonomous Claude agents in Docker sandboxes",
+      "version": "0.1.0",
+      "author": {
+        "name": "Brendan Whitney"
+      },
+      "keywords": [
+        "orchestrator",
+        "docker",
+        "sandbox",
+        "agents",
+        "worktree"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,90 @@
+# Worktree V2 - Clean Room Orchestrator
+
+## Quick Reference
+
+```bash
+# Run tests
+uv run --with pytest pytest tests/ -v
+
+# Check Beads status
+bd ready                    # Find unblocked work
+bd doctor                   # Check for issues
+
+# Dry-run a workflow
+python scripts/cli/ralph.py --repo /path/to/repo --task "test" --dry-run
+```
+
+## Project Overview
+
+This is a clean room rewrite of the worktree plugin, designed with:
+- **Testability first**: Backends are abstracted for mocking
+- **Explicit state machine**: Workflow states are clearly defined
+- **One sandbox per repo**: Auth persists across runs
+- **Proper feedback**: Terminal spawn returns success/failure
+
+See `plugins/worktree-v2/docs/WORKTREE_V2_DESIGN.md` for full architecture.
+
+## Beads Integration
+
+This project uses [Beads](https://github.com/steveyegge/beads) for task tracking.
+
+**Before starting work:**
+```bash
+bd ready                    # What's available?
+bd show <id>               # Read task details
+bd update <id> --claim     # Claim the task
+```
+
+**After completing work:**
+```bash
+bd close <id> "Summary of what was done"
+git push                   # Land the plane!
+```
+
+**If you discover new work:**
+```bash
+bd create "New issue" --deps discovered-from:<current-task>
+```
+
+See `plugins/worktree-v2/docs/BEADS_BEST_PRACTICES.md` for complete guide.
+
+## Architecture
+
+```
+Orchestrator (stateless) → Executor (stateful) → Backends (abstractions)
+                                                    ├── DockerBackend
+                                                    ├── GitBackend
+                                                    └── TerminalBackend
+```
+
+Each backend has Real, Mock, and DryRun implementations.
+
+## Directory Structure
+
+```
+plugins/worktree-v2/
+├── scripts/
+│   ├── orchestrator/     # Planner and Executor
+│   ├── backends/         # Docker, Git, Terminal abstractions
+│   ├── state/            # Workflow state, .ralph/, registry
+│   ├── cli/              # Entry points (ralph.py, spawn.py)
+│   └── tests/            # Unit, integration, e2e tests
+├── commands/             # Slash command .md files
+└── docs/                 # Design docs and guides
+```
+
+## Development Guidelines
+
+1. **No external calls without abstraction** - All Docker, git, and terminal operations go through backends
+2. **State is explicit** - Use the WorkflowState enum, save checkpoints
+3. **Errors are handled** - Backends return success/failure, never silently fail
+4. **Dry-run is comprehensive** - Should show exact commands that would run
+5. **Tests before implementation** - Write the test, then the code
+
+## Key Files
+
+- `scripts/orchestrator/models.py` - WorkflowStep, WorkflowPlan dataclasses
+- `scripts/orchestrator/planner.py` - Creates plan from inputs
+- `scripts/orchestrator/executor.py` - Runs plan, manages state
+- `scripts/backends/docker.py` - DockerBackend protocol and implementations
+- `scripts/state/workflow.py` - WorkflowState enum and transitions
