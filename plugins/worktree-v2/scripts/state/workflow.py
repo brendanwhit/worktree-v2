@@ -22,11 +22,26 @@ class WorkflowState(Enum):
 # FAILED is reachable from any non-terminal state.
 _TRANSITIONS: dict[WorkflowState, set[WorkflowState]] = {
     WorkflowState.INIT: {WorkflowState.ENSURING_REPO, WorkflowState.FAILED},
-    WorkflowState.ENSURING_REPO: {WorkflowState.CREATING_WORKTREE, WorkflowState.FAILED},
-    WorkflowState.CREATING_WORKTREE: {WorkflowState.PREPARING_SANDBOX, WorkflowState.FAILED},
-    WorkflowState.PREPARING_SANDBOX: {WorkflowState.AUTHENTICATING, WorkflowState.FAILED},
-    WorkflowState.AUTHENTICATING: {WorkflowState.INITIALIZING_STATE, WorkflowState.FAILED},
-    WorkflowState.INITIALIZING_STATE: {WorkflowState.STARTING_AGENT, WorkflowState.FAILED},
+    WorkflowState.ENSURING_REPO: {
+        WorkflowState.CREATING_WORKTREE,
+        WorkflowState.FAILED,
+    },
+    WorkflowState.CREATING_WORKTREE: {
+        WorkflowState.PREPARING_SANDBOX,
+        WorkflowState.FAILED,
+    },
+    WorkflowState.PREPARING_SANDBOX: {
+        WorkflowState.AUTHENTICATING,
+        WorkflowState.FAILED,
+    },
+    WorkflowState.AUTHENTICATING: {
+        WorkflowState.INITIALIZING_STATE,
+        WorkflowState.FAILED,
+    },
+    WorkflowState.INITIALIZING_STATE: {
+        WorkflowState.STARTING_AGENT,
+        WorkflowState.FAILED,
+    },
     WorkflowState.STARTING_AGENT: {WorkflowState.AGENT_RUNNING, WorkflowState.FAILED},
     WorkflowState.AGENT_RUNNING: {WorkflowState.COMPLETED, WorkflowState.FAILED},
     WorkflowState.COMPLETED: set(),

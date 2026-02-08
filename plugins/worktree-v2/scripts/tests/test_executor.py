@@ -1,7 +1,6 @@
 """Tests for the Executor."""
 
 from orchestrator.executor import (
-    ExecutionResult,
     Executor,
     InvalidTransitionError,
     StepResult,
@@ -31,9 +30,7 @@ class MockHandler:
 
 class TestExecutor:
     def _sandbox_plan(self) -> WorkflowPlan:
-        return Planner().create_plan(
-            PlannerInput(repo="/test/repo", task="test task")
-        )
+        return Planner().create_plan(PlannerInput(repo="/test/repo", task="test task"))
 
     def _local_plan(self) -> WorkflowPlan:
         return Planner().create_plan(

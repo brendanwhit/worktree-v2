@@ -73,9 +73,7 @@ class WorkflowPlan:
         for step in self.steps:
             for dep in step.depends_on:
                 if dep not in all_ids:
-                    errors.append(
-                        f"Step '{step.id}' depends on unknown step '{dep}'"
-                    )
+                    errors.append(f"Step '{step.id}' depends on unknown step '{dep}'")
 
         # Check for cycles
         if not errors:

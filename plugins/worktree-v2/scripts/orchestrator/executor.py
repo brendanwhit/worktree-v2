@@ -7,13 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Protocol
 
 from orchestrator.models import WorkflowPlan, WorkflowStep
-from state.workflow import (
-    WORKFLOW_ORDER,
-    WorkflowState,
-    is_terminal,
-    next_state,
-    valid_transition,
-)
+from state.workflow import WORKFLOW_ORDER, WorkflowState, valid_transition
 
 
 class StepHandler(Protocol):
@@ -82,7 +76,9 @@ class Executor:
             return
 
         # Try to advance through intermediate states to reach target
-        current_idx = WORKFLOW_ORDER.index(self._state) if self._state in WORKFLOW_ORDER else -1
+        current_idx = (
+            WORKFLOW_ORDER.index(self._state) if self._state in WORKFLOW_ORDER else -1
+        )
         target_idx = WORKFLOW_ORDER.index(target) if target in WORKFLOW_ORDER else -1
 
         if current_idx >= 0 and target_idx > current_idx:
@@ -101,13 +97,15 @@ class Executor:
         result: StepResult,
         completed: list[str],
     ) -> None:
-        self._checkpoints.append({
-            "step_id": step.id,
-            "state": self._state.name,
-            "success": result.success,
-            "completed_steps": list(completed),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
+        self._checkpoints.append(
+            {
+                "step_id": step.id,
+                "state": self._state.name,
+                "success": result.success,
+                "completed_steps": list(completed),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
     def run(self, plan: WorkflowPlan) -> ExecutionResult:
         """Execute all steps in the plan in topological order."""

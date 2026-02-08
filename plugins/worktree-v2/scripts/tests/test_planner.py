@@ -1,7 +1,5 @@
 """Tests for the Planner."""
 
-import pytest
-
 from orchestrator.planner import Planner, PlannerInput
 
 
@@ -123,16 +121,12 @@ class TestPlanner:
 
     def test_no_context_file_not_in_metadata(self):
         planner = Planner()
-        plan = planner.create_plan(
-            PlannerInput(repo="/repo", task="test")
-        )
+        plan = planner.create_plan(PlannerInput(repo="/repo", task="test"))
         assert "context_file" not in plan.metadata
 
     def test_force_flag_passed_to_sandbox(self):
         planner = Planner()
-        plan = planner.create_plan(
-            PlannerInput(repo="/repo", task="test", force=True)
-        )
+        plan = planner.create_plan(PlannerInput(repo="/repo", task="test", force=True))
         sandbox_step = plan.get_step("prepare_sandbox")
         assert sandbox_step.params["force"] is True
 
@@ -163,6 +157,7 @@ class TestPlanner:
         plan = planner.create_plan(PlannerInput(repo="/repo", task="test"))
         json_str = plan.to_json()
         from orchestrator.models import WorkflowPlan
+
         restored = WorkflowPlan.from_json(json_str)
         assert len(restored.steps) == len(plan.steps)
         assert restored.metadata == plan.metadata

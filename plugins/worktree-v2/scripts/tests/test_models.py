@@ -16,13 +16,13 @@ class TestWorkflowStep:
         assert step.depends_on == []
 
     def test_step_with_dependencies(self):
-        step = WorkflowStep(
-            id="s2", action="create_worktree", depends_on=["s1"]
-        )
+        step = WorkflowStep(id="s2", action="create_worktree", depends_on=["s1"])
         assert step.depends_on == ["s1"]
 
     def test_step_to_dict(self):
-        step = WorkflowStep(id="s1", action="clone", params={"url": "https://example.com"})
+        step = WorkflowStep(
+            id="s1", action="clone", params={"url": "https://example.com"}
+        )
         d = step.to_dict()
         assert d == {
             "id": "s1",
@@ -32,7 +32,12 @@ class TestWorkflowStep:
         }
 
     def test_step_from_dict(self):
-        data = {"id": "s1", "action": "clone", "params": {"url": "x"}, "depends_on": ["s0"]}
+        data = {
+            "id": "s1",
+            "action": "clone",
+            "params": {"url": "x"},
+            "depends_on": ["s0"],
+        }
         step = WorkflowStep.from_dict(data)
         assert step.id == "s1"
         assert step.action == "clone"
@@ -187,12 +192,14 @@ class TestWorkflowPlan:
         assert data["metadata"]["repo"] == "test-repo"
 
     def test_from_json(self):
-        json_str = json.dumps({
-            "steps": [
-                {"id": "s1", "action": "clone", "params": {}, "depends_on": []},
-            ],
-            "metadata": {"branch": "main"},
-        })
+        json_str = json.dumps(
+            {
+                "steps": [
+                    {"id": "s1", "action": "clone", "params": {}, "depends_on": []},
+                ],
+                "metadata": {"branch": "main"},
+            }
+        )
         plan = WorkflowPlan.from_json(json_str)
         assert len(plan.steps) == 1
         assert plan.metadata["branch"] == "main"

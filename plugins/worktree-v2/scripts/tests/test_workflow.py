@@ -52,10 +52,14 @@ class TestTransitions:
 
     def test_cannot_skip_states(self):
         assert not valid_transition(WorkflowState.INIT, WorkflowState.PREPARING_SANDBOX)
-        assert not valid_transition(WorkflowState.ENSURING_REPO, WorkflowState.AGENT_RUNNING)
+        assert not valid_transition(
+            WorkflowState.ENSURING_REPO, WorkflowState.AGENT_RUNNING
+        )
 
     def test_cannot_go_backwards(self):
-        assert not valid_transition(WorkflowState.CREATING_WORKTREE, WorkflowState.ENSURING_REPO)
+        assert not valid_transition(
+            WorkflowState.CREATING_WORKTREE, WorkflowState.ENSURING_REPO
+        )
         assert not valid_transition(WorkflowState.AGENT_RUNNING, WorkflowState.INIT)
 
     def test_terminal_states_have_no_transitions(self):
