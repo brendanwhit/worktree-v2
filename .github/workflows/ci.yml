@@ -6,29 +6,58 @@ on:
   pull_request:
     branches: [main]
 
+defaults:
+  run:
+    working-directory: plugins/worktree-v2
+
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - uses: astral-sh/ruff-action@v3
         with:
-          src: plugins/worktree-v2/scripts/
-      - uses: astral-sh/ruff-action@v3
+          enable-cache: true
+          cache-dependency-glob: "plugins/worktree-v2/pyproject.toml"
+      - name: Install dependencies
+        run: uv sync --dev
+      - name: Ruff lint
+        run: uv run ruff check scripts/
+      - name: Ruff format
+        run: uv run ruff format --check scripts/
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
         with:
-          args: format --check
-          src: plugins/worktree-v2/scripts/
+          enable-cache: true
+          cache-dependency-glob: "plugins/worktree-v2/pyproject.toml"
+      - name: Install dependencies
+        run: uv sync --dev
+      - name: Mypy
+        run: uv run mypy scripts/ --ignore-missing-imports --exclude 'tests/'
 
   test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
+          enable-cache: true
+          cache-dependency-glob: "plugins/worktree-v2/pyproject.toml"
           python-version: ${{ matrix.python-version }}
-      - name: Run tests
-        run: uv run --with pytest pytest plugins/worktree-v2/scripts/tests/ -v
+      - name: Install dependencies
+        run: uv sync --dev
+      - name: Run tests with coverage
+        run: uv run pytest --cov --cov-report=xml
+      - name: Upload coverage
+        if: matrix.python-version == '3.12'
+        uses: codecov/codecov-action@v4
+        with:
+          files: plugins/worktree-v2/coverage.xml
+          fail_ci_if_error: false

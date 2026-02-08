@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from orchestrator.models import WorkflowPlan, WorkflowStep
@@ -103,7 +103,7 @@ class Executor:
                 "state": self._state.name,
                 "success": result.success,
                 "completed_steps": list(completed),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
         )
 

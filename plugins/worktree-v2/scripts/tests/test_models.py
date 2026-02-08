@@ -211,7 +211,7 @@ class TestWorkflowPlan:
         restored = WorkflowPlan.from_json(json_str)
         assert len(restored.steps) == len(original.steps)
         assert restored.metadata == original.metadata
-        for orig, rest in zip(original.steps, restored.steps):
+        for orig, rest in zip(original.steps, restored.steps, strict=True):
             assert orig.id == rest.id
             assert orig.action == rest.action
             assert orig.params == rest.params
