@@ -55,6 +55,7 @@ git push                   # Land the plane!
 bd create "New issue" --deps discovered-from:<current-task>
 ```
 
+**Docker sandbox agents:** Use `no-db: true` and `no-daemon: true` in config.yaml.
 See `plugins/worktree-v2/docs/BEADS_BEST_PRACTICES.md` for complete guide.
 
 ## Architecture
@@ -89,6 +90,38 @@ plugins/worktree-v2/
 3. **Errors are handled** - Backends return success/failure, never silently fail
 4. **Dry-run is comprehensive** - Should show exact commands that would run
 5. **Tests before implementation** - Write the test, then the code
+
+## Code Patterns to Follow
+
+**DO NOT use `from __future__ import annotations`** - Use quoted strings for forward references instead:
+```python
+# Good
+def create() -> "MyClass": ...
+
+# Bad - don't add this import
+from __future__ import annotations
+```
+
+**DO NOT use `Path.cwd()` in module-level constants** - Wrap in a function for lazy evaluation:
+```python
+# Good
+def get_default_dir() -> Path:
+    return Path.cwd() / "data"
+
+# Bad - evaluated at import time
+DEFAULT_DIR = Path.cwd() / "data"
+```
+
+## CI Checklist
+
+Before pushing, run all checks locally:
+```bash
+uv run pytest                              # Tests pass
+uv run ruff check scripts/                 # Lint clean
+uv run ruff format --check scripts/        # Format clean (not same as lint!)
+```
+
+**Note:** Integration tests that run `git commit` need `user.name` and `user.email` configured in test setup.
 
 ## Key Files
 
