@@ -1,6 +1,5 @@
 """Tests for ralph.py CLI entry point."""
 
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -162,9 +161,7 @@ class TestRun:
     def test_run_creates_plan_from_args(self) -> None:
         """run() should create a PlannerInput and call Planner.create_plan."""
         parser = build_parser()
-        args = parser.parse_args(
-            ["--repo", "/tmp/repo", "--task", "fix bug"]
-        )
+        args = parser.parse_args(["--repo", "/tmp/repo", "--task", "fix bug"])
 
         mock_planner = MagicMock()
         mock_plan = MagicMock()
@@ -285,9 +282,7 @@ class TestRun:
     def test_run_executes_plan(self) -> None:
         """run() should pass the plan to executor.run()."""
         parser = build_parser()
-        args = parser.parse_args(
-            ["--repo", "/tmp/repo", "--task", "fix bug"]
-        )
+        args = parser.parse_args(["--repo", "/tmp/repo", "--task", "fix bug"])
 
         mock_planner = MagicMock()
         mock_plan = MagicMock()
@@ -321,15 +316,13 @@ class TestRun:
         mock_executor.run.return_value = mock_result
 
         # run() with dry_run should NOT execute the plan
-        result = run(args, planner=mock_planner, executor=mock_executor)
+        run(args, planner=mock_planner, executor=mock_executor)
         # In dry-run mode, executor should not be called — we just print the plan
         mock_executor.run.assert_not_called()
 
     def test_run_returns_execution_result(self) -> None:
         parser = build_parser()
-        args = parser.parse_args(
-            ["--repo", "/tmp/repo", "--task", "fix bug"]
-        )
+        args = parser.parse_args(["--repo", "/tmp/repo", "--task", "fix bug"])
 
         mock_planner = MagicMock()
         mock_plan = MagicMock()
@@ -362,9 +355,7 @@ class TestRun:
 
     def test_run_failure_returns_result_with_error(self) -> None:
         parser = build_parser()
-        args = parser.parse_args(
-            ["--repo", "/tmp/repo", "--task", "fix bug"]
-        )
+        args = parser.parse_args(["--repo", "/tmp/repo", "--task", "fix bug"])
 
         mock_planner = MagicMock()
         mock_plan = MagicMock()

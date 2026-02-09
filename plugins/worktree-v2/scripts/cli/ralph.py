@@ -9,7 +9,7 @@ import argparse
 import sys
 from typing import Any
 
-from orchestrator.executor import Executor, ExecutionResult
+from orchestrator.executor import Executor
 from orchestrator.planner import Planner, PlannerInput
 
 

@@ -107,9 +107,7 @@ class TestBuildParser:
         """spawn.py should NOT have a --force flag (no sandbox to recreate)."""
         parser = build_parser()
         with pytest.raises(SystemExit):
-            parser.parse_args(
-                ["--repo", "/tmp/repo", "--task", "fix bug", "--force"]
-            )
+            parser.parse_args(["--repo", "/tmp/repo", "--task", "fix bug", "--force"])
 
     def test_all_flags_together(self) -> None:
         parser = build_parser()
