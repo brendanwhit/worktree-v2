@@ -27,7 +27,8 @@ class RalphState:
         config_path = self.ralph_dir / "config.json"
         if not config_path.exists():
             return None
-        return json.loads(config_path.read_text())
+        result: dict[str, Any] = json.loads(config_path.read_text())
+        return result
 
     def init(
         self,
