@@ -36,8 +36,8 @@ jobs:
           cache-dependency-glob: "plugins/worktree-v2/pyproject.toml"
       - name: Install dependencies
         run: uv sync --dev
-      - name: Mypy
-        run: uv run mypy scripts/ --ignore-missing-imports --exclude 'tests/'
+      - name: ty
+        run: uv run ty check scripts/ --exclude 'scripts/tests/'
 
   test:
     runs-on: ubuntu-latest

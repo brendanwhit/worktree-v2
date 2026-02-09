@@ -12,7 +12,7 @@ dependencies = []
 dev = [
     "pytest>=8.0",
     "pytest-cov>=4.0",
-    "mypy>=1.0",
+    "ty>=0.0.15",
     "ruff>=0.4",
 ]
 
@@ -48,18 +48,6 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["scripts"]
-
-[tool.mypy]
-python_version = "3.11"
-strict = true
-warn_return_any = true
-warn_unused_ignores = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-
-[[tool.mypy.overrides]]
-module = "tests.*"
-disallow_untyped_defs = false
 
 [tool.pytest.ini_options]
 testpaths = ["scripts/tests"]
