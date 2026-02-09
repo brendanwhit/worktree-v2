@@ -1,1 +1,1 @@
-"""Backend abstractions for Docker, Git, and Terminal operations."""
+"""Backend abstractions for Auth, Docker, Git, and Terminal operations."""
