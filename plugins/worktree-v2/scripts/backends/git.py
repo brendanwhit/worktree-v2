@@ -1,11 +1,17 @@
 """GitBackend protocol and implementations (Real, Mock, DryRun)."""
 
-from __future__ import annotations
-
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
+
+
+def _extract_repo_name(url: str) -> str:
+    """Extract repo name from a URL (e.g. 'worktree-v2' from a GitHub URL)."""
+    name = url.rstrip("/").rsplit("/", 1)[-1]
+    if name.endswith(".git"):
+        name = name[:-4]
+    return name
 
 
 @runtime_checkable
@@ -59,12 +65,19 @@ class RealGitBackend:
         return result.returncode == 0
 
     def ensure_local(self, repo: str | None) -> Path | None:
-        """Ensure repo is available locally. Clone if URL, validate if path."""
+        """Ensure repo is available locally. Clone if URL, validate if path.
+
+        For URLs, parses out the repo name and checks if a local clone
+        exists in the current working directory.
+        """
         if repo is None:
             return None
 
-        # If it looks like a URL, we can't ensure_local without a target path
         if repo.startswith(("https://", "http://", "git@")):
+            repo_name = _extract_repo_name(repo)
+            candidate = Path.cwd() / repo_name
+            if candidate.is_dir() and (candidate / ".git").exists():
+                return candidate
             return None
 
         path = Path(repo)

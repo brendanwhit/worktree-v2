@@ -192,14 +192,33 @@ class TestRealGitBackend:
         result = backend.ensure_local("/nonexistent/path")
         assert result is None
 
-    def test_ensure_local_with_url(self):
+    def test_ensure_local_with_url_no_local_clone(self):
         backend = RealGitBackend()
         result = backend.ensure_local("https://github.com/test/repo")
         assert result is None
 
-    def test_ensure_local_with_ssh_url(self):
+    def test_ensure_local_with_ssh_url_no_local_clone(self):
         backend = RealGitBackend()
         result = backend.ensure_local("git@github.com:test/repo.git")
+        assert result is None
+
+    def test_ensure_local_finds_clone_from_url(self, tmp_path, monkeypatch):
+        """When a URL is given, ensure_local parses the repo name and checks CWD."""
+        # Create a fake local clone matching the repo name
+        repo_dir = tmp_path / "my-repo"
+        repo_dir.mkdir()
+        (repo_dir / ".git").mkdir()
+
+        monkeypatch.chdir(tmp_path)
+        backend = RealGitBackend()
+        result = backend.ensure_local("https://github.com/user/my-repo.git")
+        assert result == repo_dir
+
+    def test_ensure_local_url_no_match_in_cwd(self, tmp_path, monkeypatch):
+        """URL parsing works but no matching directory exists in CWD."""
+        monkeypatch.chdir(tmp_path)
+        backend = RealGitBackend()
+        result = backend.ensure_local("https://github.com/user/nonexistent")
         assert result is None
 
     def test_ensure_local_none(self):

@@ -1,7 +1,5 @@
 """Backend factory for constructing backends based on execution mode."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from enum import Enum, auto
 

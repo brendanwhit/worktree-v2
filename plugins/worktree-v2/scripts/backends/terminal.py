@@ -1,7 +1,5 @@
 """TerminalBackend protocol and implementations (Real, Mock, DryRun)."""
 
-from __future__ import annotations
-
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
