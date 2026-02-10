@@ -1,9 +1,9 @@
 Spawn an agent locally without Docker sandbox (no Docker required).
 
-Run the spawn CLI to create a worktree and start a local agent:
+Run the worktree CLI in interactive local mode:
 
 ```bash
-python scripts/cli/spawn.py $ARGUMENTS
+python scripts/cli/worktree.py run interactive local $ARGUMENTS
 ```
 
 ## Available flags

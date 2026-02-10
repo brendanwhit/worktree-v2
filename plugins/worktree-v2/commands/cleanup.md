@@ -1,9 +1,9 @@
 Clean up stale worktrees, sandboxes, and registry entries.
 
-Run the cleanup CLI to remove merged worktrees and stale resources:
+Run the worktree CLI cleanup command:
 
 ```bash
-python scripts/cli/cleanup.py $ARGUMENTS
+python scripts/cli/worktree.py cleanup $ARGUMENTS
 ```
 
 ## Available flags

@@ -27,40 +27,38 @@ class TestCommandFilesExist:
 
 
 class TestCommandFileContent:
-    """Verify command files have proper descriptions and invoke CLIs."""
+    """Verify command files have proper descriptions and invoke the unified CLI."""
 
-    def test_ralph_references_cli(self) -> None:
+    def test_ralph_references_worktree_cli(self) -> None:
         content = (COMMANDS_DIR / "ralph.md").read_text()
-        assert "ralph" in content.lower()
+        assert "worktree.py" in content
+        assert "autonomous" in content
+        assert "sandbox" in content
         assert "--repo" in content
         assert "--task" in content
 
-    def test_spawn_references_cli(self) -> None:
+    def test_spawn_references_worktree_cli(self) -> None:
         content = (COMMANDS_DIR / "spawn.md").read_text()
-        assert "spawn" in content.lower()
+        assert "worktree.py" in content
+        assert "interactive" in content
+        assert "local" in content.lower()
         assert "--repo" in content
         assert "--task" in content
 
-    def test_spawn_mentions_local(self) -> None:
-        """spawn is the local (no Docker) variant."""
-        content = (COMMANDS_DIR / "spawn.md").read_text()
-        assert "local" in content.lower() or "no docker" in content.lower()
-
-    def test_list_references_registry(self) -> None:
+    def test_list_references_worktree_cli(self) -> None:
         content = (COMMANDS_DIR / "list.md").read_text()
-        assert "list" in content.lower() or "worktree" in content.lower()
+        assert "worktree.py" in content
+        assert "list" in content.lower()
 
-    def test_resume_references_reattach(self) -> None:
+    def test_resume_references_worktree_cli(self) -> None:
         content = (COMMANDS_DIR / "resume.md").read_text()
-        assert "resume" in content.lower() or "reattach" in content.lower()
+        assert "worktree.py" in content
+        assert "resume" in content.lower()
 
-    def test_cleanup_references_removal(self) -> None:
+    def test_cleanup_references_worktree_cli(self) -> None:
         content = (COMMANDS_DIR / "cleanup.md").read_text()
-        assert (
-            "cleanup" in content.lower()
-            or "clean" in content.lower()
-            or "remove" in content.lower()
-        )
+        assert "worktree.py" in content
+        assert "cleanup" in content.lower()
 
     @pytest.mark.parametrize("cmd_name", EXPECTED_COMMANDS)
     def test_command_uses_arguments_placeholder(self, cmd_name: str) -> None:

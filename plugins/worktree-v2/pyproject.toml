@@ -6,7 +6,9 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Brendan Whitney" }]
 
-dependencies = []
+dependencies = [
+    "typer>=0.12",
+]
 
 [dependency-groups]
 dev = [

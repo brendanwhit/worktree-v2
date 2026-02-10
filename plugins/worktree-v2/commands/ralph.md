@@ -1,9 +1,9 @@
 Spawn a Ralph autonomous agent in a Docker sandbox.
 
-Run the ralph CLI to create a worktree, Docker sandbox, and start an agent:
+Run the worktree CLI in autonomous sandbox mode:
 
 ```bash
-python scripts/cli/ralph.py $ARGUMENTS
+python scripts/cli/worktree.py run autonomous sandbox $ARGUMENTS
 ```
 
 ## Available flags

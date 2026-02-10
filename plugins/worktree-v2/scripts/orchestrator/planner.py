@@ -13,7 +13,8 @@ class PlannerInput:
 
     repo: str  # Path or URL
     task: str
-    mode: str = "sandbox"  # "sandbox" or "local"
+    mode: str = "autonomous"  # "autonomous" or "interactive"
+    target: str = "sandbox"  # "sandbox", "container", or "local"
     branch: str | None = None
     context_file: str | None = None
     sandbox_name: str | None = None
@@ -37,6 +38,7 @@ class Planner:
             "repo_name": repo_name,
             "task": inputs.task,
             "mode": inputs.mode,
+            "target": inputs.target,
             "branch": branch,
             "sandbox_name": sandbox_name,
         }
@@ -83,7 +85,7 @@ class Planner:
             )
         )
 
-        if inputs.mode == "sandbox":
+        if inputs.target in ("sandbox", "container"):
             # Step 3: Prepare sandbox
             steps.append(
                 WorkflowStep(

@@ -1,9 +1,9 @@
 Resume or reattach to an existing worktree and its sandbox.
 
-Run the resume CLI to reconnect to a previously spawned agent:
+Run the worktree CLI resume command:
 
 ```bash
-python scripts/cli/resume.py $ARGUMENTS
+python scripts/cli/worktree.py resume $ARGUMENTS
 ```
 
 ## Available flags
