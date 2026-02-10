@@ -2,7 +2,19 @@
 
 import json
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any
+
+
+class Mode(StrEnum):
+    interactive = "interactive"
+    autonomous = "autonomous"
+
+
+class Target(StrEnum):
+    sandbox = "sandbox"
+    container = "container"
+    local = "local"
 
 
 @dataclass

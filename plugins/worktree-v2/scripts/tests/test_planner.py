@@ -6,7 +6,8 @@ from orchestrator.planner import Planner, PlannerInput
 class TestPlannerInput:
     def test_defaults(self):
         inp = PlannerInput(repo="/test/repo", task="implement feature")
-        assert inp.mode == "sandbox"
+        assert inp.mode == "autonomous"
+        assert inp.target == "sandbox"
         assert inp.branch is None
         assert inp.context_file is None
         assert inp.sandbox_name is None
@@ -55,14 +56,14 @@ class TestPlanner:
     def test_local_mode_creates_four_steps(self):
         planner = Planner()
         plan = planner.create_plan(
-            PlannerInput(repo="/test/repo", task="test", mode="local")
+            PlannerInput(repo="/test/repo", task="test", target="local")
         )
         assert len(plan.steps) == 4
 
     def test_local_mode_step_actions(self):
         planner = Planner()
         plan = planner.create_plan(
-            PlannerInput(repo="/test/repo", task="test", mode="local")
+            PlannerInput(repo="/test/repo", task="test", target="local")
         )
         actions = [s.action for s in plan.steps]
         assert actions == [
@@ -71,6 +72,20 @@ class TestPlanner:
             "initialize_state",
             "start_agent",
         ]
+
+    def test_container_target_creates_six_steps(self):
+        planner = Planner()
+        plan = planner.create_plan(
+            PlannerInput(repo="/test/repo", task="test", target="container")
+        )
+        assert len(plan.steps) == 6
+
+    def test_metadata_includes_target(self):
+        planner = Planner()
+        plan = planner.create_plan(
+            PlannerInput(repo="/test/repo", task="test", target="local")
+        )
+        assert plan.metadata["target"] == "local"
 
     def test_metadata_from_path(self):
         planner = Planner()

@@ -34,7 +34,7 @@ class TestExecutor:
 
     def _local_plan(self) -> WorkflowPlan:
         return Planner().create_plan(
-            PlannerInput(repo="/test/repo", task="test task", mode="local")
+            PlannerInput(repo="/test/repo", task="test task", target="local")
         )
 
     def test_successful_sandbox_execution(self):
