@@ -2,12 +2,13 @@
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 from orchestrator.models import WorkflowPlan, WorkflowStep
 from state.workflow import WORKFLOW_ORDER, WorkflowState, valid_transition
 
 
+@runtime_checkable
 class StepHandler(Protocol):
     """Protocol for step execution handlers."""
 

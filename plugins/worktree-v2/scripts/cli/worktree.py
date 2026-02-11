@@ -11,9 +11,11 @@ from pathlib import Path
 
 import typer
 
+from backends.factory import BackendMode, create_backends
 from orchestrator.executor import Executor
 from orchestrator.models import Mode, Target
 from orchestrator.planner import Planner, PlannerInput
+from orchestrator.step_handler import ExecutionContext, RealStepHandler
 from state.registry import WorktreeEntry, WorktreeRegistry
 
 app = typer.Typer(name="worktree", no_args_is_help=True)
@@ -124,7 +126,15 @@ def run(
         raise typer.Exit(code=1)
 
     planner = Planner()
-    executor = Executor()
+
+    if dry_run:
+        backends = create_backends(BackendMode.DRYRUN)
+    else:
+        backends = create_backends(BackendMode.REAL)
+
+    context = ExecutionContext(backends=backends)
+    handler = RealStepHandler(context)
+    executor = Executor(handler=handler)
 
     planner_input = PlannerInput(
         repo=repo,
