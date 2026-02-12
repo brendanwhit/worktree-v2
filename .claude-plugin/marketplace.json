@@ -1,18 +1,17 @@
 {
-  "name": "worktree-v2-marketplace",
+  "name": "superintendent-marketplace",
   "owner": {
     "name": "Brendan Whitney"
   },
   "metadata": {
-    "description": "Personal marketplace for worktree-v2 development",
-    "version": "0.1.0",
-    "pluginRoot": "./plugins"
+    "description": "Personal marketplace for superintendent development",
+    "version": "0.1.0"
   },
   "plugins": [
     {
-      "name": "worktree-v2",
-      "source": "./plugins/worktree-v2",
-      "description": "Clean room orchestrator for spawning autonomous Claude agents in Docker sandboxes",
+      "name": "superintendent",
+      "source": ".",
+      "description": "Agent orchestration CLI for spawning autonomous Claude agents in Docker sandboxes",
       "version": "0.1.0",
       "author": {
         "name": "Brendan Whitney"
@@ -22,7 +21,7 @@
         "docker",
         "sandbox",
         "agents",
-        "worktree"
+        "superintendent"
       ]
     }
   ]

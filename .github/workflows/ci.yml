@@ -6,10 +6,6 @@ on:
   pull_request:
     branches: [main]
 
-defaults:
-  run:
-    working-directory: plugins/worktree-v2
-
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -18,13 +14,13 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: "plugins/worktree-v2/pyproject.toml"
+          cache-dependency-glob: "pyproject.toml"
       - name: Install dependencies
         run: uv sync --dev
       - name: Ruff lint
-        run: uv run ruff check scripts/
+        run: uv run ruff check src/ tests/
       - name: Ruff format
-        run: uv run ruff format --check scripts/
+        run: uv run ruff format --check src/ tests/
 
   typecheck:
     runs-on: ubuntu-latest
@@ -33,11 +29,11 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: "plugins/worktree-v2/pyproject.toml"
+          cache-dependency-glob: "pyproject.toml"
       - name: Install dependencies
         run: uv sync --dev
       - name: ty
-        run: uv run ty check scripts/ --exclude 'scripts/tests/'
+        run: uv run ty check src/ --exclude 'tests/'
 
   test:
     runs-on: ubuntu-latest
@@ -49,7 +45,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: "plugins/worktree-v2/pyproject.toml"
+          cache-dependency-glob: "pyproject.toml"
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
         run: uv sync --dev
@@ -59,5 +55,5 @@ jobs:
         if: matrix.python-version == '3.12'
         uses: codecov/codecov-action@v4
         with:
-          files: plugins/worktree-v2/coverage.xml
+          files: coverage.xml
           fail_ci_if_error: false

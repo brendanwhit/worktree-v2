@@ -1,18 +1,18 @@
-# Worktree V2 - Clean Room Orchestrator
+# Superintendent - Agent Orchestration CLI
 
 ## Quick Reference
 
 ```bash
-# Setup (from plugins/worktree-v2/)
+# Setup
 uv sync --dev
 
 # Run tests
 uv run pytest                           # All tests
-uv run pytest scripts/tests/test_models.py -v  # Specific file
+uv run pytest tests/test_models.py -v   # Specific file
 
 # Linting and type checking
-uv run ruff check scripts/
-uv run mypy scripts/ --exclude 'tests/'
+uv run ruff check src/ tests/
+uv run ruff format --check src/ tests/
 
 # Check Beads status
 bd ready                    # Find unblocked work
@@ -20,18 +20,18 @@ bd show <id>                # Full task details
 bd doctor                   # Check for issues
 
 # Dry-run a workflow
-python scripts/cli/worktree.py --repo /path/to/repo --task "test" --dry-run
+superintendent run --repo /path/to/repo --task "test" --dry-run
 ```
 
 ## Project Overview
 
-This is a clean room rewrite of the worktree plugin, designed with:
+An orchestration CLI for spawning autonomous Claude agents in isolated Docker sandboxes, designed with:
 - **Testability first**: Backends are abstracted for mocking
 - **Explicit state machine**: Workflow states are clearly defined
 - **One sandbox per repo**: Auth persists across runs
 - **Proper feedback**: Terminal spawn returns success/failure
 
-See `plugins/worktree-v2/docs/WORKTREE_V2_DESIGN.md` for full architecture.
+See `docs/ARCHITECTURE.md` for full architecture.
 
 ## Beads Integration
 
@@ -56,7 +56,7 @@ bd create "New issue" --deps discovered-from:<current-task>
 ```
 
 **Docker sandbox agents:** Use `no-db: true` and `no-daemon: true` in config.yaml.
-See `plugins/worktree-v2/docs/BEADS_BEST_PRACTICES.md` for complete guide.
+See `docs/BEADS_BEST_PRACTICES.md` for complete guide.
 
 ## Architecture
 
@@ -64,7 +64,8 @@ See `plugins/worktree-v2/docs/BEADS_BEST_PRACTICES.md` for complete guide.
 Orchestrator (stateless) → Executor (stateful) → Backends (abstractions)
                                                     ├── DockerBackend
                                                     ├── GitBackend
-                                                    └── TerminalBackend
+                                                    ├── TerminalBackend
+                                                    └── AuthBackend
 ```
 
 Each backend has Real, Mock, and DryRun implementations.
@@ -72,15 +73,16 @@ Each backend has Real, Mock, and DryRun implementations.
 ## Directory Structure
 
 ```
-plugins/worktree-v2/
-├── scripts/
-│   ├── orchestrator/     # Planner and Executor
-│   ├── backends/         # Docker, Git, Terminal abstractions
-│   ├── state/            # Workflow state, .ralph/, registry
-│   ├── cli/              # Entry points (ralph.py, spawn.py)
-│   └── tests/            # Unit, integration, e2e tests
-├── commands/             # Slash command .md files
-└── docs/                 # Design docs and guides
+superintendent/
+├── src/
+│   └── superintendent/
+│       ├── orchestrator/     # Planner and Executor
+│       ├── backends/         # Docker, Git, Terminal, Auth abstractions
+│       ├── state/            # Workflow state, .ralph/, registry
+│       └── cli/              # Entry point (main.py)
+├── tests/                    # Unit, integration, e2e tests
+├── commands/                 # Slash command .md files
+└── docs/                     # Design docs and guides
 ```
 
 ## Development Guidelines
@@ -117,16 +119,16 @@ DEFAULT_DIR = Path.cwd() / "data"
 Before pushing, run all checks locally:
 ```bash
 uv run pytest                              # Tests pass
-uv run ruff check scripts/                 # Lint clean
-uv run ruff format --check scripts/        # Format clean (not same as lint!)
+uv run ruff check src/ tests/              # Lint clean
+uv run ruff format --check src/ tests/     # Format clean (not same as lint!)
 ```
 
 **Note:** Integration tests that run `git commit` need `user.name` and `user.email` configured in test setup.
 
 ## Key Files
 
-- `scripts/orchestrator/models.py` - WorkflowStep, WorkflowPlan dataclasses
-- `scripts/orchestrator/planner.py` - Creates plan from inputs
-- `scripts/orchestrator/executor.py` - Runs plan, manages state
-- `scripts/backends/docker.py` - DockerBackend protocol and implementations
-- `scripts/state/workflow.py` - WorkflowState enum and transitions
+- `src/superintendent/orchestrator/models.py` - WorkflowStep, WorkflowPlan dataclasses
+- `src/superintendent/orchestrator/planner.py` - Creates plan from inputs
+- `src/superintendent/orchestrator/executor.py` - Runs plan, manages state
+- `src/superintendent/backends/docker.py` - DockerBackend protocol and implementations
+- `src/superintendent/state/workflow.py` - WorkflowState enum and transitions
