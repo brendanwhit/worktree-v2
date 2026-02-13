@@ -3,11 +3,14 @@
 import re
 from pathlib import Path
 
-from superintendent.orchestrator.sources.models import Task, TaskStatus
-from superintendent.orchestrator.sources.protocol import TaskSource
+from .models import Task, TaskStatus
+from .protocol import TaskSource
 
 # Matches lines like: "- [ ] Task" or "- [x] Task" or "- [ ] [T001] Task"
 _TASK_PATTERN = re.compile(r"^(\s*)-\s+\[([ xX])\]\s+(?:\[([^\]]+)\]\s+)?(.+)$")
+
+
+_MARKDOWN_CANDIDATES = ["tasks.md", "TODO.md"]
 
 
 class MarkdownSource(TaskSource):
@@ -19,6 +22,20 @@ class MarkdownSource(TaskSource):
     - Nested tasks infer parent dependencies via indentation
     - Status update toggles checkboxes in the file
     """
+
+    source_name = "markdown"
+
+    @classmethod
+    def can_handle(cls, repo_root: Path) -> bool:
+        return any((repo_root / name).exists() for name in _MARKDOWN_CANDIDATES)
+
+    @classmethod
+    def create(cls, repo_root: Path) -> "MarkdownSource":
+        for name in _MARKDOWN_CANDIDATES:
+            path = repo_root / name
+            if path.exists():
+                return cls(path)
+        raise FileNotFoundError("No markdown task file found")
 
     def __init__(self, path: Path) -> None:
         self._path = path
@@ -57,6 +74,7 @@ class MarkdownSource(TaskSource):
         if changed:
             self._path.write_text("\n".join(new_lines) + "\n")
 
+    # task_id is required by the ABC interface but unused in this no-op impl
     def claim_task(self, task_id: str) -> bool:  # noqa: ARG002
         return True
 

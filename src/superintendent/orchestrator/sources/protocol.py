@@ -1,8 +1,9 @@
 """TaskSource abstract base class definition."""
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 
-from superintendent.orchestrator.sources.models import Task, TaskStatus
+from .models import Task, TaskStatus
 
 
 class TaskSource(ABC):
@@ -11,7 +12,31 @@ class TaskSource(ABC):
     All task sources must subclass this. The orchestrator is agnostic
     about where tasks come from — it only cares about getting tasks
     and updating their status.
+
+    Subclasses should define ``source_name`` and implement ``can_handle``
+    to participate in auto-detection via ``detect_source()``.
     """
+
+    source_name: str = ""
+
+    @classmethod
+    # repo_root is needed by subclass overrides but unused in the default impl
+    def can_handle(cls, repo_root: Path) -> bool:  # noqa: ARG003
+        """Return True if this source can provide tasks for the given repo.
+
+        Override in subclasses to participate in auto-detection.
+        The default returns False (opt-in).
+        """
+        return False
+
+    @classmethod
+    def create(cls, repo_root: Path) -> "TaskSource":
+        """Create an instance for the given repo.
+
+        Override in subclasses that need custom construction.
+        The default passes repo_root to __init__.
+        """
+        return cls(repo_root=repo_root)  # type: ignore[call-arg]
 
     @abstractmethod
     def get_tasks(self) -> list[Task]: ...

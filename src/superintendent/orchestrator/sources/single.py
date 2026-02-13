@@ -2,8 +2,8 @@
 
 import hashlib
 
-from superintendent.orchestrator.sources.models import Task, TaskStatus
-from superintendent.orchestrator.sources.protocol import TaskSource
+from .models import Task, TaskStatus
+from .protocol import TaskSource
 
 
 class SingleTaskSource(TaskSource):
@@ -11,7 +11,10 @@ class SingleTaskSource(TaskSource):
 
     Used for: `superintendent run --task 'fix the login bug'`
     Status updates are no-ops since this is ephemeral.
+    Not auto-detected — used as explicit fallback when a task string is provided.
     """
+
+    source_name = "single"
 
     def __init__(self, description: str, task_id: str | None = None) -> None:
         self._description = description
@@ -39,5 +42,6 @@ class SingleTaskSource(TaskSource):
     def update_status(self, task_id: str, status: TaskStatus) -> None:
         pass
 
+    # task_id is required by the ABC interface but unused in this no-op impl
     def claim_task(self, task_id: str) -> bool:  # noqa: ARG002
         return True

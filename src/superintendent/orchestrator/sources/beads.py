@@ -5,8 +5,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from superintendent.orchestrator.sources.models import Task, TaskStatus
-from superintendent.orchestrator.sources.protocol import TaskSource
+from .models import Task, TaskStatus
+from .protocol import TaskSource
 
 # Map beads status strings to TaskStatus
 _STATUS_MAP: dict[str, TaskStatus] = {
@@ -22,6 +22,13 @@ class BeadsSource(TaskSource):
     This is the native, first-class task source with full status sync.
     All operations delegate to the bd CLI, which must be available on PATH.
     """
+
+    source_name = "beads"
+
+    @classmethod
+    def can_handle(cls, repo_root: Path) -> bool:
+        beads_dir = repo_root / ".beads"
+        return beads_dir.is_dir() and (beads_dir / "issues.jsonl").exists()
 
     def __init__(self, repo_root: Path) -> None:
         self._repo_root = repo_root

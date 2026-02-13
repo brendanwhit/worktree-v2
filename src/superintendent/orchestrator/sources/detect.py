@@ -2,13 +2,23 @@
 
 from pathlib import Path
 
-from superintendent.orchestrator.sources.beads import BeadsSource
-from superintendent.orchestrator.sources.markdown import MarkdownSource
-from superintendent.orchestrator.sources.protocol import TaskSource
-from superintendent.orchestrator.sources.single import SingleTaskSource
+from .beads import BeadsSource
+from .markdown import MarkdownSource
+from .protocol import TaskSource
+from .single import SingleTaskSource
 
-# Markdown filenames to check during auto-detection, in priority order
-_MARKDOWN_CANDIDATES = ["tasks.md", "TODO.md"]
+# Auto-detection priority order. Each source's can_handle() is checked
+# in sequence; the first match wins. To add a new source, create a
+# TaskSource subclass with can_handle()/create() and add it here.
+_AUTO_DETECT_ORDER: list[type[TaskSource]] = [
+    BeadsSource,
+    MarkdownSource,
+]
+
+# Map source_name -> class for explicit --from flag
+_SOURCE_BY_NAME: dict[str, type[TaskSource]] = {
+    cls.source_name: cls for cls in [BeadsSource, MarkdownSource, SingleTaskSource]
+}
 
 
 def detect_source(
@@ -21,7 +31,7 @@ def detect_source(
 
     Args:
         repo_root: Root directory of the repository.
-        source_type: One of "auto", "beads", "markdown", "single".
+        source_type: "auto" or an explicit source name (beads, markdown, single).
         task_description: Ad-hoc task string (used for single source).
         markdown_path: Explicit path to a markdown task file.
 
@@ -33,42 +43,22 @@ def detect_source(
             return SingleTaskSource(task_description)
         return None
 
-    if source_type == "beads":
-        return BeadsSource(repo_root=repo_root)
+    if source_type == "markdown" and markdown_path is not None:
+        return MarkdownSource(markdown_path)
 
-    if source_type == "markdown":
-        path = _find_markdown(repo_root, markdown_path)
-        if path is not None:
-            return MarkdownSource(path)
+    if source_type != "auto":
+        source_cls = _SOURCE_BY_NAME.get(source_type)
+        if source_cls is not None:
+            return source_cls.create(repo_root)
         return None
 
-    # Auto-detection: beads → markdown → single
-    if _has_beads(repo_root):
-        return BeadsSource(repo_root=repo_root)
+    # Auto-detection: check each source in priority order
+    for source_cls in _AUTO_DETECT_ORDER:
+        if source_cls.can_handle(repo_root):
+            return source_cls.create(repo_root)
 
-    md_path = _find_markdown(repo_root, markdown_path)
-    if md_path is not None:
-        return MarkdownSource(md_path)
-
+    # Fallback to single task if a description was provided
     if task_description:
         return SingleTaskSource(task_description)
-
-    return None
-
-
-def _has_beads(repo_root: Path) -> bool:
-    """Check if the repo has a .beads/ directory."""
-    return (repo_root / ".beads").is_dir()
-
-
-def _find_markdown(repo_root: Path, explicit_path: Path | None = None) -> Path | None:
-    """Find a markdown task file."""
-    if explicit_path is not None and explicit_path.exists():
-        return explicit_path
-
-    for candidate in _MARKDOWN_CANDIDATES:
-        path = repo_root / candidate
-        if path.exists():
-            return path
 
     return None
