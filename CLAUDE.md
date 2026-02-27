@@ -56,6 +56,8 @@ bd create "New issue" --deps discovered-from:<current-task>
 ```
 
 **Docker sandbox agents:** Use `no-db: true` and `no-daemon: true` in config.yaml.
+Sandboxes have no SSH — use HTTPS git remotes and `gh` CLI only.
+Agents should commit, push, and create PRs via `gh pr create` before exiting.
 See `docs/BEADS_BEST_PRACTICES.md` for complete guide.
 
 ## Architecture

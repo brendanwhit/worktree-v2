@@ -236,7 +236,7 @@ class RealStepHandler:
 
         if env_name:
             docker = self._context.backends.docker
-            if not docker.run_agent(env_name, worktree_path, task):
+            if not docker.run_agent(env_name, task):
                 return StepResult(
                     success=False,
                     step_id=step.id,

@@ -140,9 +140,8 @@ bd init --branch beads-sync
 
 ## Docker Sandbox Configuration
 
-SQLite doesn't work reliably in Docker sandbox filesystems (corrupts immediately
-or shortly after creation). For agents running in Docker sandboxes, configure
-beads to use JSONL-only mode:
+The beads database (Dolt) is not available inside Docker sandboxes. For agents
+running in Docker sandboxes, configure beads to use JSONL-only mode:
 
 ```yaml
 # .beads/config.yaml
@@ -166,11 +165,22 @@ issue-prefix: <repo>  # Required for no-db mode
 3. **Pre-commit hooks still work** - they use `bd sync --flush-only` which
    succeeds in no-db mode since there's nothing to flush.
 
+### Sandbox Network Limitations
+
+Docker sandboxes have restricted network access:
+
+- **No SSH**: `git@github.com:...` URLs will fail. Use HTTPS URLs or `gh` CLI
+- **HTTPS + gh CLI only**: All git operations must use HTTPS remotes
+- **No SQLite daemon**: The beads daemon cannot run; use JSONL-only mode
+- **Agents should commit and push**: Configure agents to `git push` and
+  create PRs via `gh pr create` before finishing, since the sandbox is
+  ephemeral
+
 ### Why These Settings?
 
 | Issue | Symptom | Fix |
 |-------|---------|-----|
-| SQLite corruption | `database disk image is malformed` | `no-db: true` |
+| No DB in sandbox | Dolt not available in Docker sandbox | `no-db: true` |
 | Daemon timeout | 5-second delay on every command | `no-daemon: true` |
 | JSONL not committed | `git add` silently ignores file | Clear assume-unchanged |
 | no-db mode fails | "mixed prefixes" error | Set `issue-prefix` |

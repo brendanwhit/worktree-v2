@@ -100,13 +100,13 @@ class TestMockDockerBackend:
 
     def test_run_agent_records_call(self):
         backend = MockDockerBackend()
-        result = backend.run_agent("test", Path("/ws"), "do stuff")
+        result = backend.run_agent("test", "do stuff")
         assert result is True
-        assert backend.agents_run == [("test", Path("/ws"), "do stuff")]
+        assert backend.agents_run == [("test", "do stuff")]
 
     def test_run_agent_failure(self):
         backend = MockDockerBackend(fail_on="run_agent")
-        result = backend.run_agent("test", Path("/ws"), "do stuff")
+        result = backend.run_agent("test", "do stuff")
         assert result is False
 
     def test_list_sandboxes_empty(self):
@@ -193,18 +193,18 @@ class TestDryRunDockerBackend:
         assert result is True
         assert "docker sandbox create" in backend.commands[0]
         assert "--name test" in backend.commands[0]
-        assert "/workspace:/workspace" in backend.commands[0]
+        assert "claude /workspace" in backend.commands[0]
 
     def test_create_sandbox_with_template(self):
         backend = DryRunDockerBackend()
         backend.create_sandbox("test", Path("/ws"), template="python")
-        assert "--template python" in backend.commands[0]
+        assert "-t python" in backend.commands[0]
 
     def test_start_sandbox_records_command(self):
         backend = DryRunDockerBackend()
         result = backend.start_sandbox("test")
         assert result is True
-        assert "docker sandbox start test" in backend.commands[0]
+        assert "docker sandbox run test" in backend.commands[0]
 
     def test_stop_sandbox_records_command(self):
         backend = DryRunDockerBackend()
@@ -222,7 +222,7 @@ class TestDryRunDockerBackend:
 
     def test_run_agent_records_command(self):
         backend = DryRunDockerBackend()
-        result = backend.run_agent("test", Path("/ws"), "implement feature")
+        result = backend.run_agent("test", "implement feature")
         assert result is True
         assert "docker sandbox run" in backend.commands[0]
         assert "implement feature" in backend.commands[0]
@@ -231,7 +231,7 @@ class TestDryRunDockerBackend:
         backend = DryRunDockerBackend()
         result = backend.list_sandboxes()
         assert result == []
-        assert "docker sandbox ls" in backend.commands[0]
+        assert "docker sandbox ls -q" in backend.commands[0]
 
     def test_all_operations_accumulate(self):
         backend = DryRunDockerBackend()
@@ -239,7 +239,7 @@ class TestDryRunDockerBackend:
         backend.create_sandbox("test", Path("/ws"))
         backend.start_sandbox("test")
         backend.exec_in_sandbox("test", "echo hello")
-        backend.run_agent("test", Path("/ws"), "task")
+        backend.run_agent("test", "task")
         backend.stop_sandbox("test")
         backend.list_sandboxes()
         assert len(backend.commands) == 7

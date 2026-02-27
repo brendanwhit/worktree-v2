@@ -211,7 +211,7 @@ class TestDryRunNoSideEffects:
         docker = DryRunDockerBackend()
         docker.create_sandbox("test", Path("/tmp/workspace"))
         docker.start_sandbox("test")
-        docker.run_agent("test", Path("/tmp/workspace"), "do stuff")
+        docker.run_agent("test", "do stuff")
 
         # Operations recorded as commands but nothing actually ran
         assert len(docker.commands) == 3
@@ -462,7 +462,7 @@ class TestDryRunCommandContent:
         assert "worktree add" in worktree_cmds[0]
 
     def test_docker_create_command_includes_workspace(self) -> None:
-        """Docker create command includes workspace volume mount."""
+        """Docker create command includes workspace path as positional arg."""
         backends = _dryrun_backends()
         ctx = ExecutionContext(backends=backends)
         handler = RealStepHandler(ctx)
@@ -475,7 +475,8 @@ class TestDryRunCommandContent:
         assert isinstance(docker, DryRunDockerBackend)
         create_cmds = [c for c in docker.commands if "create" in c]
         assert len(create_cmds) >= 1
-        assert ":/workspace" in create_cmds[0]
+        assert "claude" in create_cmds[0]
+        assert "/tmp/my-repo" in create_cmds[0]
 
     def test_auth_command_references_sandbox(self) -> None:
         """Auth setup command includes the sandbox name."""

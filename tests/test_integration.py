@@ -143,7 +143,7 @@ class TestSandboxFlowIntegration:
         executor.run(plan)
 
         assert len(docker.agents_run) == 1
-        agent_sandbox, _, agent_prompt = docker.agents_run[0]
+        agent_sandbox, agent_prompt = docker.agents_run[0]
         assert agent_sandbox.startswith("claude-")
         assert agent_prompt == "fix bug"
 
