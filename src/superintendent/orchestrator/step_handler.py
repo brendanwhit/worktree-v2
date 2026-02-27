@@ -7,7 +7,7 @@ from typing import Any
 
 from superintendent.backends.factory import Backends
 from superintendent.orchestrator.executor import StepResult
-from superintendent.orchestrator.models import WorkflowStep
+from superintendent.orchestrator.models import Verbosity, WorkflowStep
 from superintendent.state.ralph import RalphState
 
 
@@ -17,6 +17,7 @@ class ExecutionContext:
 
     backends: Backends
     step_outputs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    verbosity: Verbosity = Verbosity.normal
 
 
 class RealStepHandler:
