@@ -23,7 +23,7 @@ from superintendent.orchestrator.models import Mode, Target
 from superintendent.orchestrator.planner import Planner, PlannerInput
 from superintendent.orchestrator.step_handler import ExecutionContext, RealStepHandler
 from superintendent.state.registry import WorktreeEntry, WorktreeRegistry
-from superintendent.state.token_store import TokenStore
+from superintendent.state.token_store import DEFAULT_KEY, TokenStore
 
 app = typer.Typer(name="superintendent", no_args_is_help=True)
 token_app = typer.Typer(name="token", help="Manage scoped GitHub tokens.")
@@ -589,7 +589,7 @@ def token_set_default(
         raise typer.Exit(code=1)
 
     store = get_default_token_store()
-    store.set_default(token, github_user)
+    store.add(DEFAULT_KEY, token, github_user=github_user)
     typer.echo(f"Default token set for user '{github_user}'")
 
 
@@ -597,7 +597,7 @@ def token_set_default(
 def token_remove_default() -> None:
     """Remove the default personal GitHub token."""
     store = get_default_token_store()
-    if not store.remove_default():
+    if not store.remove(DEFAULT_KEY):
         typer.echo("No default token configured", err=True)
         raise typer.Exit(code=1)
     typer.echo("Default token removed")
@@ -607,35 +607,28 @@ def token_remove_default() -> None:
 def token_status() -> None:
     """Show all stored tokens with metadata."""
     store = get_default_token_store()
-
-    # Show default token info
-    default = store.get_default()
-    if default is not None:
-        masked = (
-            default.token[:4] + "..." + default.token[-4:]
-            if len(default.token) > 8
-            else "****"
-        )
-        typer.echo(
-            f"  Default: {masked} (user: {default.github_user}, "
-            f"created: {default.created_at})"
-        )
-
-    # Show per-repo tokens
     tokens = store.list_all()
-    if not tokens and default is None:
+    if not tokens:
         typer.echo("No tokens stored.")
         return
-    for repo, entry in tokens.items():
+    for key, entry in tokens.items():
         masked = (
             entry.token[:4] + "..." + entry.token[-4:]
             if len(entry.token) > 8
             else "****"
         )
-        perms = ", ".join(entry.permissions) if entry.permissions else "none specified"
-        typer.echo(
-            f"  {repo}: {masked} (created: {entry.created_at}, permissions: {perms})"
-        )
+        if key == DEFAULT_KEY:
+            typer.echo(
+                f"  Default: {masked} (user: {entry.github_user}, "
+                f"created: {entry.created_at})"
+            )
+        else:
+            perms = (
+                ", ".join(entry.permissions) if entry.permissions else "none specified"
+            )
+            typer.echo(
+                f"  {key}: {masked} (created: {entry.created_at}, permissions: {perms})"
+            )
 
 
 if __name__ == "__main__":

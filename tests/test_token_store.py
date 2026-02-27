@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from superintendent.state.token_store import (
-    DefaultToken,
+    DEFAULT_KEY,
     ResolveResult,
     TokenEntry,
     TokenStore,
@@ -24,6 +24,17 @@ class TestTokenEntry:
         assert d["token"] == "ghp_abc123"
         assert d["created_at"] == "2026-01-01T00:00:00+00:00"
         assert d["permissions"] == ["repo", "workflow"]
+        assert "github_user" not in d  # omitted when empty
+
+    def test_to_dict_with_github_user(self) -> None:
+        entry = TokenEntry(
+            token="ghp_abc123",
+            created_at="2026-01-01T00:00:00+00:00",
+            permissions=[],
+            github_user="brendanwhit",
+        )
+        d = entry.to_dict()
+        assert d["github_user"] == "brendanwhit"
 
     def test_from_dict(self) -> None:
         d = {
@@ -34,24 +45,38 @@ class TestTokenEntry:
         entry = TokenEntry.from_dict(d)
         assert entry.token == "ghp_xyz789"
         assert entry.permissions == ["repo"]
+        assert entry.github_user == ""
+
+    def test_from_dict_with_github_user(self) -> None:
+        d = {
+            "token": "ghp_xyz789",
+            "created_at": "2026-02-01T00:00:00+00:00",
+            "permissions": [],
+            "github_user": "someuser",
+        }
+        entry = TokenEntry.from_dict(d)
+        assert entry.github_user == "someuser"
 
     def test_from_dict_defaults(self) -> None:
         d = {"token": "ghp_minimal"}
         entry = TokenEntry.from_dict(d)
         assert entry.created_at == ""
         assert entry.permissions == []
+        assert entry.github_user == ""
 
     def test_roundtrip(self) -> None:
         entry = TokenEntry(
             token="ghp_round",
             created_at="2026-01-15T12:00:00+00:00",
             permissions=["repo", "read:org"],
+            github_user="testuser",
         )
         d = entry.to_dict()
         entry2 = TokenEntry.from_dict(d)
         assert entry2.token == entry.token
         assert entry2.created_at == entry.created_at
         assert entry2.permissions == entry.permissions
+        assert entry2.github_user == entry.github_user
 
 
 class TestTokenStore:
@@ -138,55 +163,12 @@ class TestTokenStore:
         assert entry is not None
         assert len(entry.created_at) > 0
 
-
-class TestDefaultToken:
-    """Test the DefaultToken dataclass."""
-
-    def test_to_dict(self) -> None:
-        dt = DefaultToken(
-            token="ghp_default123",
-            github_user="brendanwhit",
-            created_at="2026-02-27T00:00:00+00:00",
-            permissions=["repo"],
-        )
-        d = dt.to_dict()
-        assert d["token"] == "ghp_default123"
-        assert d["github_user"] == "brendanwhit"
-        assert d["created_at"] == "2026-02-27T00:00:00+00:00"
-        assert d["permissions"] == ["repo"]
-
-    def test_from_dict(self) -> None:
-        d = {
-            "token": "ghp_default456",
-            "github_user": "someuser",
-            "created_at": "2026-02-27T00:00:00+00:00",
-            "permissions": ["repo", "workflow"],
-        }
-        dt = DefaultToken.from_dict(d)
-        assert dt.token == "ghp_default456"
-        assert dt.github_user == "someuser"
-        assert dt.permissions == ["repo", "workflow"]
-
-    def test_from_dict_defaults(self) -> None:
-        d = {"token": "ghp_minimal"}
-        dt = DefaultToken.from_dict(d)
-        assert dt.github_user == ""
-        assert dt.created_at == ""
-        assert dt.permissions == []
-
-    def test_roundtrip(self) -> None:
-        dt = DefaultToken(
-            token="ghp_round",
-            github_user="testuser",
-            created_at="2026-02-27T12:00:00+00:00",
-            permissions=["repo"],
-        )
-        d = dt.to_dict()
-        dt2 = DefaultToken.from_dict(d)
-        assert dt2.token == dt.token
-        assert dt2.github_user == dt.github_user
-        assert dt2.created_at == dt.created_at
-        assert dt2.permissions == dt.permissions
+    def test_add_with_github_user(self, tmp_path: Path) -> None:
+        store = TokenStore(tmp_path / "tokens.json")
+        store.add("owner/repo", "ghp_test", github_user="myuser")
+        entry = store.get("owner/repo")
+        assert entry is not None
+        assert entry.github_user == "myuser"
 
 
 class TestResolveResult:
@@ -204,12 +186,12 @@ class TestResolveResult:
 
 
 class TestTokenStoreDefault:
-    """Test default token set/get/remove operations."""
+    """Test default token via standard add/get/remove with DEFAULT_KEY."""
 
     def test_set_and_get_default(self, tmp_path: Path) -> None:
         store = TokenStore(tmp_path / "tokens.json")
-        store.set_default("ghp_def123", "brendanwhit")
-        default = store.get_default()
+        store.add(DEFAULT_KEY, "ghp_def123", github_user="brendanwhit")
+        default = store.get(DEFAULT_KEY)
         assert default is not None
         assert default.token == "ghp_def123"
         assert default.github_user == "brendanwhit"
@@ -217,64 +199,66 @@ class TestTokenStoreDefault:
 
     def test_get_default_when_none(self, tmp_path: Path) -> None:
         store = TokenStore(tmp_path / "tokens.json")
-        assert store.get_default() is None
+        assert store.get(DEFAULT_KEY) is None
 
     def test_remove_default(self, tmp_path: Path) -> None:
         store = TokenStore(tmp_path / "tokens.json")
-        store.set_default("ghp_def123", "brendanwhit")
-        assert store.remove_default() is True
-        assert store.get_default() is None
+        store.add(DEFAULT_KEY, "ghp_def123", github_user="brendanwhit")
+        assert store.remove(DEFAULT_KEY) is True
+        assert store.get(DEFAULT_KEY) is None
 
     def test_remove_default_when_none(self, tmp_path: Path) -> None:
         store = TokenStore(tmp_path / "tokens.json")
-        assert store.remove_default() is False
+        assert store.remove(DEFAULT_KEY) is False
 
     def test_default_preserved_across_repo_add(self, tmp_path: Path) -> None:
         store = TokenStore(tmp_path / "tokens.json")
-        store.set_default("ghp_def123", "brendanwhit")
+        store.add(DEFAULT_KEY, "ghp_def123", github_user="brendanwhit")
         store.add("org/repo", "ghp_repo456", permissions=["repo"])
-        default = store.get_default()
+        default = store.get(DEFAULT_KEY)
         assert default is not None
         assert default.token == "ghp_def123"
         assert default.github_user == "brendanwhit"
 
     def test_default_preserved_across_repo_remove(self, tmp_path: Path) -> None:
         store = TokenStore(tmp_path / "tokens.json")
-        store.set_default("ghp_def123", "brendanwhit")
+        store.add(DEFAULT_KEY, "ghp_def123", github_user="brendanwhit")
         store.add("org/repo", "ghp_repo456")
         store.remove("org/repo")
-        default = store.get_default()
+        default = store.get(DEFAULT_KEY)
         assert default is not None
         assert default.token == "ghp_def123"
 
     def test_repo_tokens_not_affected_by_default(self, tmp_path: Path) -> None:
         store = TokenStore(tmp_path / "tokens.json")
         store.add("org/repo", "ghp_repo456")
-        store.set_default("ghp_def123", "brendanwhit")
+        store.add(DEFAULT_KEY, "ghp_def123", github_user="brendanwhit")
         entry = store.get("org/repo")
         assert entry is not None
         assert entry.token == "ghp_repo456"
 
-    def test_default_not_in_list_all(self, tmp_path: Path) -> None:
+    def test_default_in_list_all(self, tmp_path: Path) -> None:
         store = TokenStore(tmp_path / "tokens.json")
-        store.set_default("ghp_def123", "brendanwhit")
+        store.add(DEFAULT_KEY, "ghp_def123", github_user="brendanwhit")
         store.add("org/repo", "ghp_repo456")
         tokens = store.list_all()
-        assert "_default" not in tokens
-        assert len(tokens) == 1
+        assert DEFAULT_KEY in tokens
+        assert len(tokens) == 2
 
     def test_set_default_with_permissions(self, tmp_path: Path) -> None:
         store = TokenStore(tmp_path / "tokens.json")
-        store.set_default("ghp_def123", "brendanwhit", permissions=["repo"])
-        default = store.get_default()
+        store.add(
+            DEFAULT_KEY, "ghp_def123", github_user="brendanwhit", permissions=["repo"]
+        )
+        default = store.get(DEFAULT_KEY)
         assert default is not None
         assert default.permissions == ["repo"]
 
     def test_set_default_overwrites(self, tmp_path: Path) -> None:
         store = TokenStore(tmp_path / "tokens.json")
-        store.set_default("ghp_old", "olduser")
-        store.set_default("ghp_new", "newuser")
-        default = store.get_default()
+        store.add(DEFAULT_KEY, "ghp_old", github_user="olduser")
+        store.add(DEFAULT_KEY, "ghp_new", github_user="newuser")
+        default = store.get(DEFAULT_KEY)
         assert default is not None
         assert default.token == "ghp_new"
         assert default.github_user == "newuser"
@@ -292,7 +276,7 @@ class TestTokenStoreResolve:
 
     def test_repo_match_overrides_default(self, tmp_path: Path) -> None:
         store = TokenStore(tmp_path / "tokens.json")
-        store.set_default("ghp_default", "brendanwhit")
+        store.add(DEFAULT_KEY, "ghp_default", github_user="brendanwhit")
         store.add("brendanwhit/repo", "ghp_explicit")
         result = store.resolve("brendanwhit/repo")
         assert result.token == "ghp_explicit"
@@ -300,21 +284,21 @@ class TestTokenStoreResolve:
 
     def test_default_fallback_for_own_repo(self, tmp_path: Path) -> None:
         store = TokenStore(tmp_path / "tokens.json")
-        store.set_default("ghp_default", "brendanwhit")
+        store.add(DEFAULT_KEY, "ghp_default", github_user="brendanwhit")
         result = store.resolve("brendanwhit/some-repo")
         assert result.token == "ghp_default"
         assert result.source == "default"
 
     def test_default_fallback_case_insensitive(self, tmp_path: Path) -> None:
         store = TokenStore(tmp_path / "tokens.json")
-        store.set_default("ghp_default", "BrendanWhit")
+        store.add(DEFAULT_KEY, "ghp_default", github_user="BrendanWhit")
         result = store.resolve("brendanwhit/some-repo")
         assert result.token == "ghp_default"
         assert result.source == "default"
 
     def test_org_requires_explicit(self, tmp_path: Path) -> None:
         store = TokenStore(tmp_path / "tokens.json")
-        store.set_default("ghp_default", "brendanwhit")
+        store.add(DEFAULT_KEY, "ghp_default", github_user="brendanwhit")
         result = store.resolve("some-org/repo")
         assert result.token is None
         assert result.source == "org_requires_explicit"
@@ -360,7 +344,7 @@ class TestTokenStoreBackwardCompatibility:
         assert tokens["org/repo1"].token == "ghp_legacy1"
 
         # Default should be None
-        assert store.get_default() is None
+        assert store.get(DEFAULT_KEY) is None
 
         # Resolve should return "none" for unknown repos
         result = store.resolve("unknown/repo")
@@ -379,8 +363,8 @@ class TestTokenStoreBackwardCompatibility:
         store = TokenStore(path)
 
         # Set a default — should not disturb existing repo tokens
-        store.set_default("ghp_default", "myuser")
-        assert store.get_default() is not None
+        store.add(DEFAULT_KEY, "ghp_default", github_user="myuser")
+        assert store.get(DEFAULT_KEY) is not None
         assert store.get("org/repo") is not None
         assert store.get("org/repo").token == "ghp_legacy"
 
