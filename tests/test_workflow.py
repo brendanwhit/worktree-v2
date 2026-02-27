@@ -16,6 +16,7 @@ class TestWorkflowState:
             "ENSURING_REPO",
             "CREATING_WORKTREE",
             "PREPARING_SANDBOX",
+            "PREPARING_CONTAINER",
             "AUTHENTICATING",
             "INITIALIZING_STATE",
             "STARTING_AGENT",
@@ -27,7 +28,7 @@ class TestWorkflowState:
         assert actual == expected
 
     def test_state_count(self):
-        assert len(WorkflowState) == 10
+        assert len(WorkflowState) == 11
 
 
 class TestTransitions:
@@ -49,6 +50,19 @@ class TestTransitions:
 
     def test_agent_running_to_completed(self):
         assert valid_transition(WorkflowState.AGENT_RUNNING, WorkflowState.COMPLETED)
+
+    def test_creating_worktree_to_preparing_container(self):
+        assert valid_transition(
+            WorkflowState.CREATING_WORKTREE, WorkflowState.PREPARING_CONTAINER
+        )
+
+    def test_preparing_container_to_authenticating(self):
+        assert valid_transition(
+            WorkflowState.PREPARING_CONTAINER, WorkflowState.AUTHENTICATING
+        )
+
+    def test_preparing_container_can_fail(self):
+        assert valid_transition(WorkflowState.PREPARING_CONTAINER, WorkflowState.FAILED)
 
     def test_cannot_skip_states(self):
         assert not valid_transition(WorkflowState.INIT, WorkflowState.PREPARING_SANDBOX)

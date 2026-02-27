@@ -86,11 +86,18 @@ class Planner:
         )
 
         if inputs.target in ("sandbox", "container"):
-            # Step 3: Prepare sandbox
+            # Step 3: Prepare sandbox or container
+            if inputs.target == "container":
+                prep_id = "prepare_container"
+                prep_action = "prepare_container"
+            else:
+                prep_id = "prepare_sandbox"
+                prep_action = "prepare_sandbox"
+
             steps.append(
                 WorkflowStep(
-                    id="prepare_sandbox",
-                    action="prepare_sandbox",
+                    id=prep_id,
+                    action=prep_action,
                     params={
                         "sandbox_name": metadata["sandbox_name"],
                         "force": inputs.force,
@@ -99,7 +106,7 @@ class Planner:
                 )
             )
 
-            # Step 4: Authenticate in sandbox
+            # Step 4: Authenticate
             steps.append(
                 WorkflowStep(
                     id="authenticate",
@@ -107,7 +114,7 @@ class Planner:
                     params={
                         "sandbox_name": metadata["sandbox_name"],
                     },
-                    depends_on=["prepare_sandbox"],
+                    depends_on=[prep_id],
                 )
             )
 
@@ -124,7 +131,7 @@ class Planner:
                 )
             )
 
-            # Step 6: Start agent in sandbox
+            # Step 6: Start agent
             steps.append(
                 WorkflowStep(
                     id="start_agent",

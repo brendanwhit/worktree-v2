@@ -8,6 +8,7 @@ class WorkflowState(Enum):
     ENSURING_REPO = auto()
     CREATING_WORKTREE = auto()
     PREPARING_SANDBOX = auto()
+    PREPARING_CONTAINER = auto()
     AUTHENTICATING = auto()
     INITIALIZING_STATE = auto()
     STARTING_AGENT = auto()
@@ -26,9 +27,15 @@ _TRANSITIONS: dict[WorkflowState, set[WorkflowState]] = {
     },
     WorkflowState.CREATING_WORKTREE: {
         WorkflowState.PREPARING_SANDBOX,
+        WorkflowState.PREPARING_CONTAINER,
         WorkflowState.FAILED,
     },
     WorkflowState.PREPARING_SANDBOX: {
+        WorkflowState.PREPARING_CONTAINER,
+        WorkflowState.AUTHENTICATING,
+        WorkflowState.FAILED,
+    },
+    WorkflowState.PREPARING_CONTAINER: {
         WorkflowState.AUTHENTICATING,
         WorkflowState.FAILED,
     },
@@ -52,6 +59,7 @@ WORKFLOW_ORDER: list[WorkflowState] = [
     WorkflowState.ENSURING_REPO,
     WorkflowState.CREATING_WORKTREE,
     WorkflowState.PREPARING_SANDBOX,
+    WorkflowState.PREPARING_CONTAINER,
     WorkflowState.AUTHENTICATING,
     WorkflowState.INITIALIZING_STATE,
     WorkflowState.STARTING_AGENT,

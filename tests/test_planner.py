@@ -80,6 +80,47 @@ class TestPlanner:
         )
         assert len(plan.steps) == 6
 
+    def test_container_target_uses_prepare_container(self):
+        planner = Planner()
+        plan = planner.create_plan(
+            PlannerInput(repo="/test/repo", task="test", target="container")
+        )
+        actions = [s.action for s in plan.steps]
+        assert actions == [
+            "validate_repo",
+            "create_worktree",
+            "prepare_container",
+            "authenticate",
+            "initialize_state",
+            "start_agent",
+        ]
+
+    def test_container_target_step_ids(self):
+        planner = Planner()
+        plan = planner.create_plan(
+            PlannerInput(repo="/test/repo", task="test", target="container")
+        )
+        ids = [s.id for s in plan.steps]
+        assert "prepare_container" in ids
+        assert "prepare_sandbox" not in ids
+
+    def test_container_authenticate_depends_on_prepare_container(self):
+        planner = Planner()
+        plan = planner.create_plan(
+            PlannerInput(repo="/test/repo", task="test", target="container")
+        )
+        auth_step = plan.get_step("authenticate")
+        assert auth_step.depends_on == ["prepare_container"]
+
+    def test_sandbox_target_still_uses_prepare_sandbox(self):
+        planner = Planner()
+        plan = planner.create_plan(
+            PlannerInput(repo="/test/repo", task="test", target="sandbox")
+        )
+        actions = [s.action for s in plan.steps]
+        assert "prepare_sandbox" in actions
+        assert "prepare_container" not in actions
+
     def test_metadata_includes_target(self):
         planner = Planner()
         plan = planner.create_plan(

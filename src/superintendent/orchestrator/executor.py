@@ -45,6 +45,7 @@ _ACTION_TO_STATE: dict[str, WorkflowState] = {
     "validate_repo": WorkflowState.ENSURING_REPO,
     "create_worktree": WorkflowState.CREATING_WORKTREE,
     "prepare_sandbox": WorkflowState.PREPARING_SANDBOX,
+    "prepare_container": WorkflowState.PREPARING_CONTAINER,
     "authenticate": WorkflowState.AUTHENTICATING,
     "initialize_state": WorkflowState.INITIALIZING_STATE,
     "start_agent": WorkflowState.STARTING_AGENT,

@@ -28,6 +28,7 @@ class RealStepHandler:
             "validate_repo": self._handle_validate_repo,
             "create_worktree": self._handle_create_worktree,
             "prepare_sandbox": self._handle_prepare_sandbox,
+            "prepare_container": self._handle_prepare_container,
             "authenticate": self._handle_authenticate,
             "initialize_state": self._handle_initialize_state,
             "start_agent": self._handle_start_agent,
@@ -143,6 +144,38 @@ class RealStepHandler:
                 success=False,
                 step_id=step.id,
                 message=f"Failed to create sandbox: {sandbox_name}",
+            )
+
+        return StepResult(
+            success=True,
+            step_id=step.id,
+            data={"sandbox_name": sandbox_name},
+        )
+
+    # -- Docker handlers (prepare_container) -----------------------------------
+
+    def _handle_prepare_container(self, step: WorkflowStep) -> StepResult:
+        wt_output = self._context.step_outputs.get("create_worktree")
+        if wt_output is None:
+            return StepResult(
+                success=False,
+                step_id=step.id,
+                message="Missing create_worktree output (worktree_path)",
+            )
+
+        docker = self._context.backends.docker
+        sandbox_name = step.params["sandbox_name"]
+        force = step.params.get("force", False)
+        workspace = Path(wt_output["worktree_path"])
+
+        if force and docker.sandbox_exists(sandbox_name):
+            docker.stop_sandbox(sandbox_name)
+
+        if not docker.create_sandbox(sandbox_name, workspace):
+            return StepResult(
+                success=False,
+                step_id=step.id,
+                message=f"Failed to create container: {sandbox_name}",
             )
 
         return StepResult(
