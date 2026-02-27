@@ -6,18 +6,21 @@ from .beads import BeadsSource
 from .markdown import MarkdownSource
 from .protocol import TaskSource
 from .single import SingleTaskSource
+from .speckit import SpecKitSource
 
 # Auto-detection priority order. Each source's can_handle() is checked
 # in sequence; the first match wins. To add a new source, create a
 # TaskSource subclass with can_handle()/create() and add it here.
 _AUTO_DETECT_ORDER: list[type[TaskSource]] = [
     BeadsSource,
+    SpecKitSource,
     MarkdownSource,
 ]
 
 # Map source_name -> class for explicit --from flag
 _SOURCE_BY_NAME: dict[str, type[TaskSource]] = {
-    cls.source_name: cls for cls in [BeadsSource, MarkdownSource, SingleTaskSource]
+    cls.source_name: cls
+    for cls in [BeadsSource, SpecKitSource, MarkdownSource, SingleTaskSource]
 }
 
 

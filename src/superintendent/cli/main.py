@@ -19,9 +19,11 @@ import typer
 from superintendent.backends.factory import BackendMode, create_backends
 from superintendent.backends.git import DEFAULT_STALE_DAYS, GitBackend, RealGitBackend
 from superintendent.orchestrator.executor import Executor
-from superintendent.orchestrator.models import Mode, Target
+from superintendent.orchestrator.models import Mode, Target, Verbosity
 from superintendent.orchestrator.planner import Planner, PlannerInput
+from superintendent.orchestrator.repo_info import RepoInfo
 from superintendent.orchestrator.step_handler import ExecutionContext, RealStepHandler
+from superintendent.orchestrator.strategy import ExecutionStrategy, TaskInfo
 from superintendent.state.registry import WorktreeEntry, WorktreeRegistry
 from superintendent.state.token_store import DEFAULT_KEY, TokenStore
 
@@ -290,6 +292,71 @@ def smart_cleanup(
     return candidates
 
 
+def resolve_verbosity(verbose: bool, quiet: bool) -> Verbosity:
+    """Resolve --verbose/--quiet flags into a Verbosity enum value."""
+    if verbose and quiet:
+        raise typer.BadParameter("--verbose and --quiet are mutually exclusive")
+    if verbose:
+        return Verbosity.verbose
+    if quiet:
+        return Verbosity.quiet
+    return Verbosity.normal
+
+
+def explain_plan(
+    repo: str,
+    task: str,
+    mode: Mode,
+    target: Target,
+) -> str:
+    """Generate a human-readable explanation of what the orchestrator would do."""
+    lines: list[str] = []
+
+    # Task source info
+    lines.append(f"Task: {task}")
+    lines.append(f"Repository: {repo}")
+
+    # Repo analysis
+    repo_path = Path(repo)
+    if repo_path.is_dir():
+        repo_info = RepoInfo.from_path(repo_path)
+        lines.append(
+            f"  - has_dockerfile: {'yes' if repo_info.has_dockerfile else 'no'}"
+        )
+        lines.append(
+            f"  - has_devcontainer: {'yes' if repo_info.has_devcontainer else 'no'}"
+        )
+        lines.append(f"  - needs_auth: {'yes' if repo_info.needs_auth else 'no'}")
+        lines.append(f"  - has_env_file: {'yes' if repo_info.has_env_file else 'no'}")
+        if repo_info.languages:
+            lines.append(f"  - languages: {', '.join(repo_info.languages)}")
+    else:
+        repo_info = RepoInfo(
+            has_dockerfile=False,
+            has_devcontainer=False,
+            has_env_file=False,
+            needs_auth=False,
+        )
+
+    # Strategy decision
+    strategy = ExecutionStrategy()
+    task_info = [TaskInfo(name=task)]
+    decision = strategy.decide(
+        task_info,
+        repo_info,
+        mode_override=mode,
+        target_override=target,
+    )
+
+    lines.append("")
+    lines.append(f"Decision: {decision.mode.value} + {decision.target.value}")
+    lines.append("")
+    explanation = strategy.explain(decision)
+    lines.append(explanation)
+
+    return "\n".join(lines)
+
+
 @app.command()
 def run(
     mode: Mode = typer.Argument(
@@ -310,11 +377,20 @@ def run(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Show the plan without executing."
     ),
+    explain: bool = typer.Option(
+        False, "--explain", help="Show what would happen without executing."
+    ),
     force: bool = typer.Option(
         False, help="Force recreation of existing sandbox/worktree."
     ),
     sandbox_name: str | None = typer.Option(
         None, help="Custom name for the Docker sandbox."
+    ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Show detailed progress and backend commands."
+    ),
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q", help="Suppress non-error output."
     ),
     dangerously_skip_isolation: bool = typer.Option(
         False,
@@ -323,6 +399,13 @@ def run(
     ),
 ) -> None:
     """Create a workspace and spawn an agent."""
+    verbosity = resolve_verbosity(verbose, quiet)
+
+    if explain:
+        output = explain_plan(repo, task, mode, target)
+        typer.echo(output)
+        return
+
     if (
         mode == Mode.autonomous
         and target == Target.local
@@ -338,7 +421,7 @@ def run(
     else:
         backends = create_backends(BackendMode.REAL)
 
-    context = ExecutionContext(backends=backends)
+    context = ExecutionContext(backends=backends, verbosity=verbosity)
     handler = RealStepHandler(context)
     executor = Executor(handler=handler)
 
