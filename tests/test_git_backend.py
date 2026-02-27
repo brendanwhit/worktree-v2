@@ -138,9 +138,7 @@ class TestMockGitBackend:
         assert backend.branch_exists(Path("/repo"), "no-branch") is False
 
     def test_branch_exists_failure(self):
-        backend = MockGitBackend(
-            fail_on="branch_exists", known_branches={"feature/x"}
-        )
+        backend = MockGitBackend(fail_on="branch_exists", known_branches={"feature/x"})
         assert backend.branch_exists(Path("/repo"), "feature/x") is False
 
     def test_create_worktree_from_existing(self):
@@ -469,15 +467,18 @@ class TestRealGitBackend:
         subprocess.run(["git", "init", str(repo_path)], check=True, capture_output=True)
         subprocess.run(
             ["git", "-C", str(repo_path), "config", "user.email", "test@test.com"],
-            check=True, capture_output=True,
+            check=True,
+            capture_output=True,
         )
         subprocess.run(
             ["git", "-C", str(repo_path), "config", "user.name", "Test"],
-            check=True, capture_output=True,
+            check=True,
+            capture_output=True,
         )
         subprocess.run(
             ["git", "-C", str(repo_path), "commit", "--allow-empty", "-m", "init"],
-            check=True, capture_output=True,
+            check=True,
+            capture_output=True,
         )
 
         backend = RealGitBackend()
@@ -495,20 +496,33 @@ class TestRealGitBackend:
         subprocess.run(["git", "init", str(repo_path)], check=True, capture_output=True)
         subprocess.run(
             ["git", "-C", str(repo_path), "config", "user.email", "test@test.com"],
-            check=True, capture_output=True,
+            check=True,
+            capture_output=True,
         )
         subprocess.run(
             ["git", "-C", str(repo_path), "config", "user.name", "Test"],
-            check=True, capture_output=True,
+            check=True,
+            capture_output=True,
         )
         subprocess.run(
             ["git", "-C", str(repo_path), "commit", "--allow-empty", "-m", "init"],
-            check=True, capture_output=True,
+            check=True,
+            capture_output=True,
         )
         wt_path = tmp_path / "wt"
         subprocess.run(
-            ["git", "-C", str(repo_path), "worktree", "add", str(wt_path), "-b", "test-branch"],
-            check=True, capture_output=True,
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "worktree",
+                "add",
+                str(wt_path),
+                "-b",
+                "test-branch",
+            ],
+            check=True,
+            capture_output=True,
         )
 
         backend = RealGitBackend()
@@ -525,22 +539,26 @@ class TestRealGitBackend:
         subprocess.run(["git", "init", str(repo_path)], check=True, capture_output=True)
         subprocess.run(
             ["git", "-C", str(repo_path), "config", "user.email", "test@test.com"],
-            check=True, capture_output=True,
+            check=True,
+            capture_output=True,
         )
         subprocess.run(
             ["git", "-C", str(repo_path), "config", "user.name", "Test"],
-            check=True, capture_output=True,
+            check=True,
+            capture_output=True,
         )
         subprocess.run(
             ["git", "-C", str(repo_path), "commit", "--allow-empty", "-m", "init"],
-            check=True, capture_output=True,
+            check=True,
+            capture_output=True,
         )
 
         backend = RealGitBackend()
         # Default branch should exist (either main or master)
         result = subprocess.run(
             ["git", "-C", str(repo_path), "branch", "--show-current"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         default_branch = result.stdout.strip()
         assert backend.branch_exists(repo_path, default_branch) is True
@@ -555,20 +573,24 @@ class TestRealGitBackend:
         subprocess.run(["git", "init", str(repo_path)], check=True, capture_output=True)
         subprocess.run(
             ["git", "-C", str(repo_path), "config", "user.email", "test@test.com"],
-            check=True, capture_output=True,
+            check=True,
+            capture_output=True,
         )
         subprocess.run(
             ["git", "-C", str(repo_path), "config", "user.name", "Test"],
-            check=True, capture_output=True,
+            check=True,
+            capture_output=True,
         )
         subprocess.run(
             ["git", "-C", str(repo_path), "commit", "--allow-empty", "-m", "init"],
-            check=True, capture_output=True,
+            check=True,
+            capture_output=True,
         )
         # Create a branch
         subprocess.run(
             ["git", "-C", str(repo_path), "branch", "existing-branch"],
-            check=True, capture_output=True,
+            check=True,
+            capture_output=True,
         )
 
         backend = RealGitBackend()

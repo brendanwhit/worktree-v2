@@ -188,7 +188,9 @@ class RealGitBackend:
         for line in result.stdout.splitlines():
             if line.startswith("worktree "):
                 if current_path is not None:
-                    worktrees.append(WorktreeInfo(path=current_path, branch=current_branch))
+                    worktrees.append(
+                        WorktreeInfo(path=current_path, branch=current_branch)
+                    )
                 current_path = Path(line.split(" ", 1)[1])
                 current_branch = None
             elif line.startswith("branch "):
@@ -209,7 +211,14 @@ class RealGitBackend:
             return True
         # Check remote branches
         result = subprocess.run(
-            ["git", "-C", str(repo), "rev-parse", "--verify", f"refs/remotes/origin/{branch}"],
+            [
+                "git",
+                "-C",
+                str(repo),
+                "rev-parse",
+                "--verify",
+                f"refs/remotes/origin/{branch}",
+            ],
             capture_output=True,
             text=True,
         )
@@ -228,7 +237,12 @@ class RealGitBackend:
     def get_branch_age_days(self, repo: Path, branch: str) -> float | None:
         result = subprocess.run(
             [
-                "git", "-C", str(repo), "log", "-1", "--format=%ct",
+                "git",
+                "-C",
+                str(repo),
+                "log",
+                "-1",
+                "--format=%ct",
                 f"refs/heads/{branch}",
             ],
             capture_output=True,
@@ -308,12 +322,12 @@ class MockGitBackend:
             return None
         return self.local_repos.get(repo)
 
-    def list_worktrees(self, repo: Path) -> list["WorktreeInfo"]:
+    def list_worktrees(self, repo: Path) -> list["WorktreeInfo"]:  # noqa: ARG002
         if self.fail_on == "list_worktrees":
             return []
         return self.known_worktrees
 
-    def branch_exists(self, repo: Path, branch: str) -> bool:
+    def branch_exists(self, repo: Path, branch: str) -> bool:  # noqa: ARG002
         if self.fail_on == "branch_exists":
             return False
         return branch in self.known_branches
@@ -326,7 +340,7 @@ class MockGitBackend:
         self.worktrees.append((repo, branch, target))
         return True
 
-    def get_branch_age_days(self, repo: Path, branch: str) -> float | None:
+    def get_branch_age_days(self, repo: Path, branch: str) -> float | None:  # noqa: ARG002
         if self.fail_on == "get_branch_age_days":
             return None
         return self.branch_ages.get(branch)
@@ -381,9 +395,7 @@ class DryRunGitBackend:
         return True
 
     def get_branch_age_days(self, repo: Path, branch: str) -> float | None:
-        self.commands.append(
-            f"git -C {repo} log -1 --format=%ct refs/heads/{branch}"
-        )
+        self.commands.append(f"git -C {repo} log -1 --format=%ct refs/heads/{branch}")
         return 0.0
 
     def merge_branch(self, repo: Path, source: str) -> bool:

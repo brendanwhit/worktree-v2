@@ -447,9 +447,7 @@ class TestResumeCommand:
         with patch(
             "superintendent.cli.main.get_default_registry", return_value=registry
         ):
-            result = runner.invoke(
-                app, ["resume", "--name", "feature/cool-feature"]
-            )
+            result = runner.invoke(app, ["resume", "--name", "feature/cool-feature"])
             assert result.exit_code == 0
             assert "Resuming" in result.output
 
