@@ -28,6 +28,7 @@ class RealStepHandler:
             "validate_repo": self._handle_validate_repo,
             "create_worktree": self._handle_create_worktree,
             "prepare_sandbox": self._handle_prepare_sandbox,
+            "prepare_container": self._handle_prepare_container,
             "authenticate": self._handle_authenticate,
             "initialize_state": self._handle_initialize_state,
             "start_agent": self._handle_start_agent,
@@ -151,17 +152,51 @@ class RealStepHandler:
             data={"sandbox_name": sandbox_name},
         )
 
+    # -- Docker handlers (prepare_container) -----------------------------------
+
+    def _handle_prepare_container(self, step: WorkflowStep) -> StepResult:
+        wt_output = self._context.step_outputs.get("create_worktree")
+        if wt_output is None:
+            return StepResult(
+                success=False,
+                step_id=step.id,
+                message="Missing create_worktree output (worktree_path)",
+            )
+
+        docker = self._context.backends.docker
+        container_name = step.params["container_name"]
+        force = step.params.get("force", False)
+        workspace = Path(wt_output["worktree_path"])
+
+        if force and docker.container_exists(container_name):
+            docker.stop_container(container_name)
+
+        if not docker.create_container(container_name, workspace):
+            return StepResult(
+                success=False,
+                step_id=step.id,
+                message=f"Failed to create container: {container_name}",
+            )
+
+        return StepResult(
+            success=True,
+            step_id=step.id,
+            data={"container_name": container_name},
+        )
+
     # -- Auth handler (authenticate) ------------------------------------------
 
     def _handle_authenticate(self, step: WorkflowStep) -> StepResult:
         auth = self._context.backends.auth
-        sandbox_name = step.params["sandbox_name"]
+        env_name = step.params.get("sandbox_name") or step.params.get(
+            "container_name", ""
+        )
 
-        if not auth.setup_git_auth(sandbox_name):
+        if not auth.setup_git_auth(env_name):
             return StepResult(
                 success=False,
                 step_id=step.id,
-                message=f"Failed to configure auth in sandbox: {sandbox_name}",
+                message=f"Failed to configure auth in {env_name}",
             )
 
         return StepResult(success=True, step_id=step.id)
@@ -193,19 +228,19 @@ class RealStepHandler:
     # -- Terminal handler (start_agent) ---------------------------------------
 
     def _handle_start_agent(self, step: WorkflowStep) -> StepResult:
-        sandbox_name = step.params.get("sandbox_name")
+        env_name = step.params.get("sandbox_name") or step.params.get("container_name")
         task = step.params.get("task", "")
 
         wt_output = self._context.step_outputs.get("create_worktree")
         worktree_path = Path(wt_output["worktree_path"]) if wt_output else Path.cwd()
 
-        if sandbox_name:
+        if env_name:
             docker = self._context.backends.docker
-            if not docker.run_agent(sandbox_name, worktree_path, task):
+            if not docker.run_agent(env_name, worktree_path, task):
                 return StepResult(
                     success=False,
                     step_id=step.id,
-                    message=f"Failed to start agent in sandbox: {sandbox_name}",
+                    message=f"Failed to start agent in {env_name}",
                 )
         else:
             terminal = self._context.backends.terminal
