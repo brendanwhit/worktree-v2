@@ -29,6 +29,7 @@ class Planner:
     """
 
     def create_plan(self, inputs: PlannerInput) -> WorkflowPlan:
+        """Build and validate a WorkflowPlan from the given inputs."""
         repo_name = self._extract_repo_name(inputs.repo)
         env_name = inputs.sandbox_name or f"claude-{repo_name}"
         branch = inputs.branch or f"agent/{repo_name}"

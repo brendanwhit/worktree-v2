@@ -6,6 +6,8 @@ from typing import Any
 
 
 class TaskStatus(StrEnum):
+    """Lifecycle status of a task across all source backends."""
+
     pending = "pending"
     in_progress = "in_progress"
     completed = "completed"

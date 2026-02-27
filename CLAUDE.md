@@ -19,8 +19,8 @@ bd ready                    # Find unblocked work
 bd show <id>                # Full task details
 bd doctor                   # Check for issues
 
-# Dry-run a workflow
-superintendent run --repo /path/to/repo --task "test" --dry-run
+# Dry-run a workflow (sup is an alias for superintendent)
+superintendent run autonomous sandbox --repo /path/to/repo --task "test" --dry-run
 ```
 
 ## Project Overview
@@ -61,14 +61,18 @@ See `docs/BEADS_BEST_PRACTICES.md` for complete guide.
 ## Architecture
 
 ```
-Orchestrator (stateless) → Executor (stateful) → Backends (abstractions)
-                                                    ├── DockerBackend
-                                                    ├── GitBackend
-                                                    ├── TerminalBackend
-                                                    └── AuthBackend
+CLI (typer)
+  → Planner (stateless) → creates WorkflowPlan
+  → Executor (stateful) → runs plan through state machine
+    → StepHandler → dispatches to backends
+      ├── DockerBackend   (sandbox/container lifecycle)
+      ├── GitBackend      (clone, worktree, checkout)
+      ├── TerminalBackend (spawn agent process)
+      └── AuthBackend     (token injection, git auth)
 ```
 
 Each backend has Real, Mock, and DryRun implementations.
+Task sources (Beads, Markdown, Single) are pluggable via the TaskSource protocol.
 
 ## Directory Structure
 
@@ -76,10 +80,10 @@ Each backend has Real, Mock, and DryRun implementations.
 superintendent/
 ├── src/
 │   └── superintendent/
-│       ├── orchestrator/     # Planner and Executor
+│       ├── cli/              # Typer entry point (main.py)
+│       ├── orchestrator/     # Planner, Executor, StepHandler, sources/
 │       ├── backends/         # Docker, Git, Terminal, Auth abstractions
-│       ├── state/            # Workflow state, .ralph/, registry
-│       └── cli/              # Entry point (main.py)
+│       └── state/            # WorkflowState, .ralph/, registry, checkpoints
 ├── tests/                    # Unit, integration, e2e tests
 ├── commands/                 # Slash command .md files
 └── docs/                     # Design docs and guides
@@ -127,8 +131,14 @@ uv run ruff format --check src/ tests/     # Format clean (not same as lint!)
 
 ## Key Files
 
-- `src/superintendent/orchestrator/models.py` - WorkflowStep, WorkflowPlan dataclasses
-- `src/superintendent/orchestrator/planner.py` - Creates plan from inputs
-- `src/superintendent/orchestrator/executor.py` - Runs plan, manages state
+- `src/superintendent/cli/main.py` - Typer CLI with run/list/resume/cleanup commands
+- `src/superintendent/orchestrator/models.py` - WorkflowStep, WorkflowPlan, Mode, Target
+- `src/superintendent/orchestrator/planner.py` - Creates WorkflowPlan from PlannerInput
+- `src/superintendent/orchestrator/executor.py` - Runs plan through state machine
+- `src/superintendent/orchestrator/step_handler.py` - Dispatches steps to backends
+- `src/superintendent/orchestrator/strategy.py` - Decides mode, target, parallelism
+- `src/superintendent/orchestrator/sources/protocol.py` - TaskSource ABC
 - `src/superintendent/backends/docker.py` - DockerBackend protocol and implementations
+- `src/superintendent/backends/factory.py` - BackendMode enum, create_backends()
 - `src/superintendent/state/workflow.py` - WorkflowState enum and transitions
+- `src/superintendent/state/registry.py` - WorktreeRegistry for tracking entries

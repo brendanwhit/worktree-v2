@@ -41,10 +41,12 @@ class MarkdownSource(TaskSource):
         self._path = path
 
     def get_tasks(self) -> list[Task]:
+        """Parse all checklist items from the markdown file."""
         content = self._path.read_text()
         return self._parse_tasks(content)
 
     def get_ready_tasks(self) -> list[Task]:
+        """Return unchecked tasks whose parent dependencies are completed."""
         tasks = self.get_tasks()
         completed_ids = {t.task_id for t in tasks if t.status == TaskStatus.completed}
         return [
@@ -54,6 +56,7 @@ class MarkdownSource(TaskSource):
         ]
 
     def update_status(self, task_id: str, status: TaskStatus) -> None:
+        """Toggle the checkbox in the markdown file to reflect new status."""
         content = self._path.read_text()
         lines = content.splitlines()
         new_lines: list[str] = []
