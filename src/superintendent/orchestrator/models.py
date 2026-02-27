@@ -21,6 +21,14 @@ class Target(StrEnum):
     local = "local"
 
 
+class Verbosity(StrEnum):
+    """Output verbosity level for CLI commands."""
+
+    quiet = "quiet"
+    normal = "normal"
+    verbose = "verbose"
+
+
 @dataclass
 class WorkflowStep:
     """A single step in a workflow plan."""
