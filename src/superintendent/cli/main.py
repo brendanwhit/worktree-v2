@@ -8,7 +8,9 @@ Subcommands:
     token     — Manage scoped GitHub tokens
 """
 
+import os
 import re
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -555,12 +557,73 @@ def token_remove(
     typer.echo(f"Token removed for {repo}")
 
 
+@token_app.command("set-default")
+def token_set_default(
+    token: str = typer.Option(..., prompt=True, hide_input=True, help="GitHub token."),
+) -> None:
+    """Set the default personal GitHub token.
+
+    Validates the token by calling `gh api user` and stores the
+    associated GitHub username for owner-based resolution.
+    """
+    env = {**os.environ, "GH_TOKEN": token}
+    try:
+        result = subprocess.run(
+            ["gh", "api", "user", "--jq", ".login"],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=30,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        typer.echo(f"Error: could not validate token: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if result.returncode != 0:
+        typer.echo(f"Error: token validation failed: {result.stderr.strip()}", err=True)
+        raise typer.Exit(code=1)
+
+    github_user = result.stdout.strip()
+    if not github_user:
+        typer.echo("Error: could not determine GitHub username from token", err=True)
+        raise typer.Exit(code=1)
+
+    store = get_default_token_store()
+    store.set_default(token, github_user)
+    typer.echo(f"Default token set for user '{github_user}'")
+
+
+@token_app.command("remove-default")
+def token_remove_default() -> None:
+    """Remove the default personal GitHub token."""
+    store = get_default_token_store()
+    if not store.remove_default():
+        typer.echo("No default token configured", err=True)
+        raise typer.Exit(code=1)
+    typer.echo("Default token removed")
+
+
 @token_app.command("status")
 def token_status() -> None:
     """Show all stored tokens with metadata."""
     store = get_default_token_store()
+
+    # Show default token info
+    default = store.get_default()
+    if default is not None:
+        masked = (
+            default.token[:4] + "..." + default.token[-4:]
+            if len(default.token) > 8
+            else "****"
+        )
+        typer.echo(
+            f"  Default: {masked} (user: {default.github_user}, "
+            f"created: {default.created_at})"
+        )
+
+    # Show per-repo tokens
     tokens = store.list_all()
-    if not tokens:
+    if not tokens and default is None:
         typer.echo("No tokens stored.")
         return
     for repo, entry in tokens.items():
