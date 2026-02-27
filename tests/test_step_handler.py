@@ -63,6 +63,7 @@ class TestRealStepHandlerDispatch:
             "validate_repo",
             "create_worktree",
             "prepare_sandbox",
+            "prepare_container",
             "authenticate",
             "initialize_state",
             "start_agent",
@@ -344,6 +345,98 @@ class TestPrepareSandboxHandler:
         assert result.success is False
 
 
+class TestPrepareContainerHandler:
+    def test_creates_container(self, tmp_path):
+        """Creates a docker container with the worktree path as workspace."""
+        docker = MockDockerBackend()
+        ctx = ExecutionContext(backends=_mock_backends(docker=docker))
+        ctx.step_outputs["create_worktree"] = {"worktree_path": str(tmp_path)}
+        handler = RealStepHandler(ctx)
+
+        step = WorkflowStep(
+            id="prepare_container",
+            action="prepare_container",
+            params={"container_name": "claude-test", "force": False},
+            depends_on=["create_worktree"],
+        )
+        result = handler.execute(step)
+
+        assert result.success is True
+        assert len(docker.containers_created) == 1
+        assert docker.containers_created[0][0] == "claude-test"
+        # Sandbox methods should NOT be called
+        assert len(docker.created) == 0
+
+    def test_force_recreates_existing(self, tmp_path):
+        """With force=True, stops existing container before recreating."""
+        docker = MockDockerBackend(containers={"claude-test": True})
+        ctx = ExecutionContext(backends=_mock_backends(docker=docker))
+        ctx.step_outputs["create_worktree"] = {"worktree_path": str(tmp_path)}
+        handler = RealStepHandler(ctx)
+
+        step = WorkflowStep(
+            id="prepare_container",
+            action="prepare_container",
+            params={"container_name": "claude-test", "force": True},
+            depends_on=["create_worktree"],
+        )
+        result = handler.execute(step)
+
+        assert result.success is True
+        assert len(docker.containers_stopped) == 1
+        assert len(docker.containers_created) == 1
+        # Sandbox methods should NOT be called
+        assert len(docker.stopped) == 0
+
+    def test_container_creation_fails(self, tmp_path):
+        """When docker.create_container fails, return failure."""
+        docker = MockDockerBackend(fail_on="create_container")
+        ctx = ExecutionContext(backends=_mock_backends(docker=docker))
+        ctx.step_outputs["create_worktree"] = {"worktree_path": str(tmp_path)}
+        handler = RealStepHandler(ctx)
+
+        step = WorkflowStep(
+            id="prepare_container",
+            action="prepare_container",
+            params={"container_name": "claude-test", "force": False},
+            depends_on=["create_worktree"],
+        )
+        result = handler.execute(step)
+
+        assert result.success is False
+
+    def test_outputs_container_name(self, tmp_path):
+        """Successful prepare_container saves container_name to context."""
+        docker = MockDockerBackend()
+        ctx = ExecutionContext(backends=_mock_backends(docker=docker))
+        ctx.step_outputs["create_worktree"] = {"worktree_path": str(tmp_path)}
+        handler = RealStepHandler(ctx)
+
+        step = WorkflowStep(
+            id="prepare_container",
+            action="prepare_container",
+            params={"container_name": "claude-test", "force": False},
+            depends_on=["create_worktree"],
+        )
+        handler.execute(step)
+
+        assert ctx.step_outputs["prepare_container"]["container_name"] == "claude-test"
+
+    def test_missing_worktree_path_fails(self):
+        """If create_worktree output is missing, fail gracefully."""
+        ctx = ExecutionContext(backends=_mock_backends())
+        handler = RealStepHandler(ctx)
+
+        step = WorkflowStep(
+            id="prepare_container",
+            action="prepare_container",
+            params={"container_name": "claude-test", "force": False},
+        )
+        result = handler.execute(step)
+
+        assert result.success is False
+
+
 # ---------------------------------------------------------------------------
 # Task 20: Auth and terminal step handlers
 # ---------------------------------------------------------------------------
@@ -361,6 +454,23 @@ class TestAuthenticateHandler:
             action="authenticate",
             params={"sandbox_name": "claude-test"},
             depends_on=["prepare_sandbox"],
+        )
+        result = handler.execute(step)
+
+        assert result.success is True
+        assert auth.git_auths == ["claude-test"]
+
+    def test_sets_up_git_auth_with_container_name(self):
+        """Calls auth.setup_git_auth with the container name."""
+        auth = MockAuthBackend()
+        ctx = ExecutionContext(backends=_mock_backends(auth=auth))
+        handler = RealStepHandler(ctx)
+
+        step = WorkflowStep(
+            id="authenticate",
+            action="authenticate",
+            params={"container_name": "claude-test"},
+            depends_on=["prepare_container"],
         )
         result = handler.execute(step)
 
@@ -431,6 +541,25 @@ class TestStartAgentHandler:
             id="start_agent",
             action="start_agent",
             params={"sandbox_name": "claude-test", "task": "do stuff"},
+            depends_on=["initialize_state"],
+        )
+        result = handler.execute(step)
+
+        assert result.success is True
+        assert len(docker.agents_run) == 1
+        assert docker.agents_run[0][0] == "claude-test"
+
+    def test_spawns_in_container(self, tmp_path):
+        """When container_name is in params, uses docker.run_agent."""
+        docker = MockDockerBackend()
+        ctx = ExecutionContext(backends=_mock_backends(docker=docker))
+        ctx.step_outputs["create_worktree"] = {"worktree_path": str(tmp_path)}
+        handler = RealStepHandler(ctx)
+
+        step = WorkflowStep(
+            id="start_agent",
+            action="start_agent",
+            params={"container_name": "claude-test", "task": "do stuff"},
             depends_on=["initialize_state"],
         )
         result = handler.execute(step)
@@ -519,6 +648,31 @@ class TestFullPlanExecution:
 
         assert result.error is None, f"Unexpected error: {result.error}"
         assert len(result.completed_steps) == 6
+        assert result.failed_step is None
+
+    def test_container_plan_with_real_handler(self, tmp_path):
+        """A complete container plan succeeds with mock backends."""
+        from superintendent.orchestrator.executor import Executor
+        from superintendent.orchestrator.planner import Planner, PlannerInput
+
+        repo_path = tmp_path / "my-repo"
+        git = MockGitBackend(local_repos={str(repo_path): repo_path})
+        docker = MockDockerBackend()
+        ctx = ExecutionContext(
+            backends=_mock_backends(git=git, docker=docker),
+        )
+        handler = RealStepHandler(ctx)
+        executor = Executor(handler=handler)
+
+        plan = Planner().create_plan(
+            PlannerInput(repo=str(repo_path), task="test task", target="container")
+        )
+        result = executor.run(plan)
+
+        assert result.error is None, f"Unexpected error: {result.error}"
+        assert len(result.completed_steps) == 6
+        assert "prepare_container" in result.completed_steps
+        assert "prepare_sandbox" not in result.completed_steps
         assert result.failed_step is None
 
     def test_local_plan_with_real_handler(self, tmp_path):

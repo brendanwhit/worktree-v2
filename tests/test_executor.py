@@ -32,6 +32,11 @@ class TestExecutor:
     def _sandbox_plan(self) -> WorkflowPlan:
         return Planner().create_plan(PlannerInput(repo="/test/repo", task="test task"))
 
+    def _container_plan(self) -> WorkflowPlan:
+        return Planner().create_plan(
+            PlannerInput(repo="/test/repo", task="test task", target="container")
+        )
+
     def _local_plan(self) -> WorkflowPlan:
         return Planner().create_plan(
             PlannerInput(repo="/test/repo", task="test task", target="local")
@@ -55,6 +60,44 @@ class TestExecutor:
             "initialize_state",
             "start_agent",
         ]
+
+    def test_successful_container_execution(self):
+        handler = MockHandler()
+        executor = Executor(handler=handler)
+        plan = self._container_plan()
+        result = executor.run(plan)
+
+        assert result.state == WorkflowState.AGENT_RUNNING
+        assert result.failed_step is None
+        assert result.error is None
+        assert len(result.completed_steps) == 6
+        assert result.completed_steps == [
+            "validate_repo",
+            "create_worktree",
+            "prepare_container",
+            "authenticate",
+            "initialize_state",
+            "start_agent",
+        ]
+
+    def test_container_handler_sees_prepare_container(self):
+        handler = MockHandler()
+        executor = Executor(handler=handler)
+        plan = self._container_plan()
+        executor.run(plan)
+
+        assert "prepare_container" in handler.executed
+        assert "prepare_sandbox" not in handler.executed
+
+    def test_container_failure_on_prepare(self):
+        handler = MockHandler(fail_on="prepare_container")
+        executor = Executor(handler=handler)
+        plan = self._container_plan()
+        result = executor.run(plan)
+
+        assert result.state == WorkflowState.FAILED
+        assert result.failed_step == "prepare_container"
+        assert result.completed_steps == ["validate_repo", "create_worktree"]
 
     def test_successful_local_execution(self):
         handler = MockHandler()
