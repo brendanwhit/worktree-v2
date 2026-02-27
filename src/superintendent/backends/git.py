@@ -116,6 +116,10 @@ class GitBackend(Protocol):
         """
         ...
 
+    def get_default_branch(self, repo: Path) -> str:
+        """Get the default branch name for the remote (e.g. 'main' or 'master')."""
+        ...
+
 
 class RealGitBackend:
     """Executes actual git commands via subprocess."""
@@ -274,6 +278,33 @@ class RealGitBackend:
             return False
         return True
 
+    def get_default_branch(self, repo: Path) -> str:
+        result = subprocess.run(
+            ["git", "-C", str(repo), "symbolic-ref", "refs/remotes/origin/HEAD"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            # Output is like "refs/remotes/origin/main"
+            return result.stdout.strip().removeprefix("refs/remotes/origin/")
+        # Fallback: check for common branch names
+        for candidate in ("main", "master"):
+            check = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repo),
+                    "rev-parse",
+                    "--verify",
+                    f"refs/remotes/origin/{candidate}",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if check.returncode == 0:
+                return candidate
+        return "main"
+
 
 @dataclass
 class MockGitBackend:
@@ -290,6 +321,7 @@ class MockGitBackend:
     known_worktrees: list["WorktreeInfo"] = field(default_factory=list)
     known_branches: set[str] = field(default_factory=set)
     branch_ages: dict[str, float] = field(default_factory=dict)
+    default_branch: str = "main"
 
     def clone(self, url: str, path: Path) -> bool:
         if self.fail_on == "clone":
@@ -351,6 +383,9 @@ class MockGitBackend:
         self.merges.append((repo, source))
         return True
 
+    def get_default_branch(self, repo: Path) -> str:  # noqa: ARG002
+        return self.default_branch
+
 
 class DryRunGitBackend:
     """Prints commands that would be run without executing them."""
@@ -401,3 +436,7 @@ class DryRunGitBackend:
     def merge_branch(self, repo: Path, source: str) -> bool:
         self.commands.append(f"git -C {repo} merge {source} --no-edit")
         return True
+
+    def get_default_branch(self, repo: Path) -> str:
+        self.commands.append(f"git -C {repo} symbolic-ref refs/remotes/origin/HEAD")
+        return "main"

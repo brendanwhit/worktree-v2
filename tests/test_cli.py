@@ -922,3 +922,22 @@ class TestCheckAndMergeStale:
         result = check_and_merge_stale(entry, git, stale_days=2.0)
         assert result is not None
         assert "merged main successfully" in result
+
+    def test_uses_detected_default_branch(self, tmp_path: Path) -> None:
+        wt_path = tmp_path / "worktree"
+        wt_path.mkdir()
+        entry = WorktreeEntry(
+            name="wt",
+            repo="/repo",
+            branch="feature/x",
+            worktree_path=str(wt_path),
+        )
+        git = MockGitBackend(
+            branch_ages={"feature/x": 10.0},
+            default_branch="develop",
+        )
+        result = check_and_merge_stale(entry, git)
+        assert result is not None
+        assert "merged develop successfully" in result
+        # Should merge origin/develop, not origin/main
+        assert git.merges[0][1] == "origin/develop"

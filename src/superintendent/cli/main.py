@@ -145,20 +145,23 @@ def check_and_merge_stale(
     if age < stale_days:
         return None
 
-    # Branch is stale — try to merge main
+    # Branch is stale — try to merge the default branch
     age_str = f"{age:.0f}"
     if not git_backend.fetch(worktree_path):
         return f"Branch '{entry.branch}' is {age_str} days stale, but fetch failed"
 
-    if git_backend.merge_branch(worktree_path, "origin/main"):
+    default_branch = git_backend.get_default_branch(worktree_path)
+    remote_ref = f"origin/{default_branch}"
+
+    if git_backend.merge_branch(worktree_path, remote_ref):
         return (
             f"Branch '{entry.branch}' was {age_str} days stale; "
-            f"merged main successfully"
+            f"merged {default_branch} successfully"
         )
     else:
         return (
             f"Branch '{entry.branch}' is {age_str} days stale; "
-            f"merge from main had conflicts (auto-aborted)"
+            f"merge from {default_branch} had conflicts (auto-aborted)"
         )
 
 

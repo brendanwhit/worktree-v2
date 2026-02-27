@@ -183,6 +183,14 @@ class TestMockGitBackend:
         assert backend.merge_branch(Path("/repo"), "main") is False
         assert backend.merges == []
 
+    def test_get_default_branch(self):
+        backend = MockGitBackend(default_branch="master")
+        assert backend.get_default_branch(Path("/repo")) == "master"
+
+    def test_get_default_branch_default(self):
+        backend = MockGitBackend()
+        assert backend.get_default_branch(Path("/repo")) == "main"
+
 
 class TestDryRunGitBackend:
     """Test DryRunGitBackend command recording."""
@@ -277,6 +285,12 @@ class TestDryRunGitBackend:
         result = backend.merge_branch(Path("/repo"), "origin/main")
         assert result is True
         assert "merge origin/main" in backend.commands[0]
+
+    def test_get_default_branch_records_command(self):
+        backend = DryRunGitBackend()
+        result = backend.get_default_branch(Path("/repo"))
+        assert result == "main"
+        assert "symbolic-ref" in backend.commands[0]
 
 
 class TestRealGitBackend:
