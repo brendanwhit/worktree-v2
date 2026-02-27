@@ -2,8 +2,11 @@
 
 import subprocess
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, runtime_checkable
+
+DEFAULT_STALE_DAYS = 7
 
 
 def _extract_repo_name(url: str) -> str:
@@ -96,6 +99,21 @@ class GitBackend(Protocol):
         self, repo: Path, branch: str, target: Path
     ) -> bool:
         """Create a worktree from an existing branch (no -b flag)."""
+        ...
+
+    def get_branch_age_days(self, repo: Path, branch: str) -> float | None:
+        """Get the age of the last commit on a branch in days.
+
+        Returns None if the branch doesn't exist or age can't be determined.
+        """
+        ...
+
+    def merge_branch(self, repo: Path, source: str) -> bool:
+        """Merge source branch into the current branch.
+
+        Returns True on success, False on failure (e.g. merge conflict).
+        On conflict, the merge is automatically aborted.
+        """
         ...
 
 
@@ -207,6 +225,41 @@ class RealGitBackend:
         )
         return result.returncode == 0
 
+    def get_branch_age_days(self, repo: Path, branch: str) -> float | None:
+        result = subprocess.run(
+            [
+                "git", "-C", str(repo), "log", "-1", "--format=%ct",
+                f"refs/heads/{branch}",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        try:
+            timestamp = int(result.stdout.strip())
+        except ValueError:
+            return None
+        commit_time = datetime.fromtimestamp(timestamp, tz=UTC)
+        age = datetime.now(UTC) - commit_time
+        return age.total_seconds() / 86400
+
+    def merge_branch(self, repo: Path, source: str) -> bool:
+        result = subprocess.run(
+            ["git", "-C", str(repo), "merge", source, "--no-edit"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            # Abort the failed merge
+            subprocess.run(
+                ["git", "-C", str(repo), "merge", "--abort"],
+                capture_output=True,
+                text=True,
+            )
+            return False
+        return True
+
 
 @dataclass
 class MockGitBackend:
@@ -216,11 +269,13 @@ class MockGitBackend:
     worktrees: list[tuple[Path, str, Path]] = field(default_factory=list)
     fetched: list[Path] = field(default_factory=list)
     checkouts: list[tuple[Path, str]] = field(default_factory=list)
+    merges: list[tuple[Path, str]] = field(default_factory=list)
 
     fail_on: str | None = None
     local_repos: dict[str, Path] = field(default_factory=dict)
     known_worktrees: list["WorktreeInfo"] = field(default_factory=list)
     known_branches: set[str] = field(default_factory=set)
+    branch_ages: dict[str, float] = field(default_factory=dict)
 
     def clone(self, url: str, path: Path) -> bool:
         if self.fail_on == "clone":
@@ -271,6 +326,17 @@ class MockGitBackend:
         self.worktrees.append((repo, branch, target))
         return True
 
+    def get_branch_age_days(self, repo: Path, branch: str) -> float | None:
+        if self.fail_on == "get_branch_age_days":
+            return None
+        return self.branch_ages.get(branch)
+
+    def merge_branch(self, repo: Path, source: str) -> bool:
+        if self.fail_on == "merge_branch":
+            return False
+        self.merges.append((repo, source))
+        return True
+
 
 class DryRunGitBackend:
     """Prints commands that would be run without executing them."""
@@ -312,4 +378,14 @@ class DryRunGitBackend:
         self, repo: Path, branch: str, target: Path
     ) -> bool:
         self.commands.append(f"git -C {repo} worktree add {target} {branch}")
+        return True
+
+    def get_branch_age_days(self, repo: Path, branch: str) -> float | None:
+        self.commands.append(
+            f"git -C {repo} log -1 --format=%ct refs/heads/{branch}"
+        )
+        return 0.0
+
+    def merge_branch(self, repo: Path, source: str) -> bool:
+        self.commands.append(f"git -C {repo} merge {source} --no-edit")
         return True

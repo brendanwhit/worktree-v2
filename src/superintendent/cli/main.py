@@ -13,7 +13,7 @@ from pathlib import Path
 import typer
 
 from superintendent.backends.factory import BackendMode, create_backends
-from superintendent.backends.git import GitBackend, RealGitBackend
+from superintendent.backends.git import DEFAULT_STALE_DAYS, GitBackend, RealGitBackend
 from superintendent.orchestrator.executor import Executor
 from superintendent.orchestrator.models import Mode, Target
 from superintendent.orchestrator.planner import Planner, PlannerInput
@@ -122,6 +122,44 @@ def auto_create_worktree(
     )
     registry.add(entry)
     return entry
+
+
+def check_and_merge_stale(
+    entry: WorktreeEntry,
+    git_backend: GitBackend,
+    stale_days: float = DEFAULT_STALE_DAYS,
+) -> str | None:
+    """Check if a branch is stale and merge main if so.
+
+    Returns a status message describing what happened, or None if
+    the branch is not stale.
+    """
+    worktree_path = Path(entry.worktree_path)
+    if not worktree_path.exists():
+        return None
+
+    age = git_backend.get_branch_age_days(worktree_path, entry.branch)
+    if age is None:
+        return None
+
+    if age < stale_days:
+        return None
+
+    # Branch is stale — try to merge main
+    age_str = f"{age:.0f}"
+    if not git_backend.fetch(worktree_path):
+        return f"Branch '{entry.branch}' is {age_str} days stale, but fetch failed"
+
+    if git_backend.merge_branch(worktree_path, "origin/main"):
+        return (
+            f"Branch '{entry.branch}' was {age_str} days stale; "
+            f"merged main successfully"
+        )
+    else:
+        return (
+            f"Branch '{entry.branch}' is {age_str} days stale; "
+            f"merge from main had conflicts (auto-aborted)"
+        )
 
 
 def cleanup_by_name(
@@ -296,6 +334,13 @@ def resume(
             for e in all_entries:
                 typer.echo(f"  {e.name} [{e.branch}]", err=True)
         raise typer.Exit(code=1)
+
+    # Check for stale branch and auto-merge main
+    if not no_merge:
+        git_backend = RealGitBackend()
+        merge_msg = check_and_merge_stale(entry, git_backend)
+        if merge_msg:
+            typer.echo(merge_msg)
 
     sandbox_info = f" (sandbox: {entry.sandbox_name})" if entry.sandbox_name else ""
     typer.echo(f"Resuming: {entry.name} at {entry.worktree_path}{sandbox_info}")

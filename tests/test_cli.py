@@ -11,6 +11,7 @@ from superintendent.cli.main import (
     _branch_to_slug,
     app,
     auto_create_worktree,
+    check_and_merge_stale,
     cleanup_all,
     cleanup_by_name,
     list_entries,
@@ -813,3 +814,113 @@ class TestAutoCreateWorktree:
         assert entry.worktree_path == str(wt_dir)
         # create_worktree_from_existing should NOT have been called
         assert len(git.worktrees) == 0
+
+
+class TestCheckAndMergeStale:
+    """Test the check_and_merge_stale function."""
+
+    def test_not_stale_returns_none(self, tmp_path: Path) -> None:
+        wt_path = tmp_path / "worktree"
+        wt_path.mkdir()
+        entry = WorktreeEntry(
+            name="wt",
+            repo="/repo",
+            branch="feature/x",
+            worktree_path=str(wt_path),
+        )
+        git = MockGitBackend(branch_ages={"feature/x": 3.0})
+        result = check_and_merge_stale(entry, git)
+        assert result is None
+
+    def test_stale_merges_successfully(self, tmp_path: Path) -> None:
+        wt_path = tmp_path / "worktree"
+        wt_path.mkdir()
+        entry = WorktreeEntry(
+            name="wt",
+            repo="/repo",
+            branch="feature/old",
+            worktree_path=str(wt_path),
+        )
+        git = MockGitBackend(branch_ages={"feature/old": 10.0})
+        result = check_and_merge_stale(entry, git)
+        assert result is not None
+        assert "merged main successfully" in result
+        assert "10 days stale" in result
+        assert len(git.fetched) == 1
+        assert len(git.merges) == 1
+
+    def test_stale_merge_conflict(self, tmp_path: Path) -> None:
+        wt_path = tmp_path / "worktree"
+        wt_path.mkdir()
+        entry = WorktreeEntry(
+            name="wt",
+            repo="/repo",
+            branch="feature/conflict",
+            worktree_path=str(wt_path),
+        )
+        git = MockGitBackend(
+            branch_ages={"feature/conflict": 14.0},
+            fail_on="merge_branch",
+        )
+        result = check_and_merge_stale(entry, git)
+        assert result is not None
+        assert "conflicts" in result
+        assert "auto-aborted" in result
+
+    def test_stale_fetch_fails(self, tmp_path: Path) -> None:
+        wt_path = tmp_path / "worktree"
+        wt_path.mkdir()
+        entry = WorktreeEntry(
+            name="wt",
+            repo="/repo",
+            branch="feature/x",
+            worktree_path=str(wt_path),
+        )
+        git = MockGitBackend(
+            branch_ages={"feature/x": 10.0},
+            fail_on="fetch",
+        )
+        result = check_and_merge_stale(entry, git)
+        assert result is not None
+        assert "fetch failed" in result
+
+    def test_unknown_branch_age_returns_none(self, tmp_path: Path) -> None:
+        wt_path = tmp_path / "worktree"
+        wt_path.mkdir()
+        entry = WorktreeEntry(
+            name="wt",
+            repo="/repo",
+            branch="feature/x",
+            worktree_path=str(wt_path),
+        )
+        git = MockGitBackend()  # no branch_ages
+        result = check_and_merge_stale(entry, git)
+        assert result is None
+
+    def test_missing_worktree_path_returns_none(self) -> None:
+        entry = WorktreeEntry(
+            name="wt",
+            repo="/repo",
+            branch="feature/x",
+            worktree_path="/nonexistent",
+        )
+        git = MockGitBackend(branch_ages={"feature/x": 10.0})
+        result = check_and_merge_stale(entry, git)
+        assert result is None
+
+    def test_custom_stale_threshold(self, tmp_path: Path) -> None:
+        wt_path = tmp_path / "worktree"
+        wt_path.mkdir()
+        entry = WorktreeEntry(
+            name="wt",
+            repo="/repo",
+            branch="feature/x",
+            worktree_path=str(wt_path),
+        )
+        git = MockGitBackend(branch_ages={"feature/x": 3.0})
+        # With default threshold (7 days), 3 days should NOT be stale
+        assert check_and_merge_stale(entry, git) is None
+        # With threshold of 2 days, 3 days IS stale
+        result = check_and_merge_stale(entry, git, stale_days=2.0)
+        assert result is not None
+        assert "merged main successfully" in result

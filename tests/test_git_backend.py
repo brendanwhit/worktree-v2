@@ -158,6 +158,33 @@ class TestMockGitBackend:
         )
         assert result is False
 
+    def test_get_branch_age_days(self):
+        backend = MockGitBackend(branch_ages={"main": 10.5})
+        result = backend.get_branch_age_days(Path("/repo"), "main")
+        assert result == 10.5
+
+    def test_get_branch_age_days_unknown(self):
+        backend = MockGitBackend()
+        result = backend.get_branch_age_days(Path("/repo"), "main")
+        assert result is None
+
+    def test_get_branch_age_days_failure(self):
+        backend = MockGitBackend(
+            fail_on="get_branch_age_days", branch_ages={"main": 5.0}
+        )
+        assert backend.get_branch_age_days(Path("/repo"), "main") is None
+
+    def test_merge_branch(self):
+        backend = MockGitBackend()
+        result = backend.merge_branch(Path("/repo"), "main")
+        assert result is True
+        assert backend.merges == [(Path("/repo"), "main")]
+
+    def test_merge_branch_failure(self):
+        backend = MockGitBackend(fail_on="merge_branch")
+        assert backend.merge_branch(Path("/repo"), "main") is False
+        assert backend.merges == []
+
 
 class TestDryRunGitBackend:
     """Test DryRunGitBackend command recording."""
@@ -239,6 +266,19 @@ class TestDryRunGitBackend:
         assert result is True
         assert "worktree add" in backend.commands[0]
         assert "feature/x" in backend.commands[0]
+
+    def test_get_branch_age_days_records_command(self):
+        backend = DryRunGitBackend()
+        result = backend.get_branch_age_days(Path("/repo"), "main")
+        assert result == 0.0
+        assert "log -1" in backend.commands[0]
+        assert "main" in backend.commands[0]
+
+    def test_merge_branch_records_command(self):
+        backend = DryRunGitBackend()
+        result = backend.merge_branch(Path("/repo"), "origin/main")
+        assert result is True
+        assert "merge origin/main" in backend.commands[0]
 
 
 class TestRealGitBackend:
