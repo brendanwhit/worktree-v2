@@ -131,6 +131,51 @@ class TestMockDockerBackend:
         backend.stop_sandbox("s1")
         assert backend.sandbox_exists("s1") is False
 
+    # -- Container operations -------------------------------------------------
+
+    def test_container_exists_when_created(self):
+        backend = MockDockerBackend(containers={"test-container": True})
+        assert backend.container_exists("test-container") is True
+
+    def test_container_not_exists(self):
+        backend = MockDockerBackend()
+        assert backend.container_exists("nonexistent") is False
+
+    def test_create_container_records_call(self):
+        backend = MockDockerBackend()
+        result = backend.create_container("test", Path("/workspace"))
+        assert result is True
+        assert len(backend.containers_created) == 1
+        assert backend.containers_created[0] == ("test", Path("/workspace"))
+        assert backend.container_exists("test") is True
+
+    def test_create_container_failure(self):
+        backend = MockDockerBackend(fail_on="create_container")
+        result = backend.create_container("test", Path("/ws"))
+        assert result is False
+        assert len(backend.containers_created) == 0
+
+    def test_stop_container_records_call(self):
+        backend = MockDockerBackend(containers={"test": True})
+        result = backend.stop_container("test")
+        assert result is True
+        assert backend.containers_stopped == ["test"]
+        assert backend.container_exists("test") is False
+
+    def test_stop_container_failure(self):
+        backend = MockDockerBackend(fail_on="stop_container")
+        result = backend.stop_container("test")
+        assert result is False
+
+    def test_container_and_sandbox_are_independent(self):
+        backend = MockDockerBackend()
+        backend.create_sandbox("shared-name", Path("/w1"))
+        assert backend.sandbox_exists("shared-name") is True
+        assert backend.container_exists("shared-name") is False
+
+        backend.create_container("shared-name", Path("/w2"))
+        assert backend.container_exists("shared-name") is True
+
 
 class TestDryRunDockerBackend:
     """Test DryRunDockerBackend command recording."""
@@ -198,6 +243,30 @@ class TestDryRunDockerBackend:
         backend.stop_sandbox("test")
         backend.list_sandboxes()
         assert len(backend.commands) == 7
+
+    # -- Container operations -------------------------------------------------
+
+    def test_container_exists_records_command(self):
+        backend = DryRunDockerBackend()
+        result = backend.container_exists("test")
+        assert result is False
+        assert len(backend.commands) == 1
+        assert "docker ps" in backend.commands[0]
+        assert "test" in backend.commands[0]
+
+    def test_create_container_records_command(self):
+        backend = DryRunDockerBackend()
+        result = backend.create_container("test", Path("/workspace"))
+        assert result is True
+        assert "docker run" in backend.commands[0]
+        assert "--name test" in backend.commands[0]
+        assert "/workspace:/workspace" in backend.commands[0]
+
+    def test_stop_container_records_command(self):
+        backend = DryRunDockerBackend()
+        result = backend.stop_container("test")
+        assert result is True
+        assert "docker rm -f test" in backend.commands[0]
 
 
 class TestRealDockerBackendIntegration:

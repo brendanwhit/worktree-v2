@@ -8,7 +8,9 @@ from typing import Protocol, runtime_checkable
 
 @runtime_checkable
 class DockerBackend(Protocol):
-    """Protocol for Docker sandbox operations."""
+    """Protocol for Docker sandbox and container operations."""
+
+    # -- Sandbox operations (docker sandbox) ----------------------------------
 
     def sandbox_exists(self, name: str) -> bool: ...
 
@@ -25,6 +27,14 @@ class DockerBackend(Protocol):
     def run_agent(self, name: str, workspace: Path, prompt: str) -> bool: ...
 
     def list_sandboxes(self) -> list[str]: ...
+
+    # -- Container operations (docker run) ------------------------------------
+
+    def container_exists(self, name: str) -> bool: ...
+
+    def create_container(self, name: str, workspace: Path) -> bool: ...
+
+    def stop_container(self, name: str) -> bool: ...
 
 
 class RealDockerBackend:
@@ -114,20 +124,74 @@ class RealDockerBackend:
             return []
         return [line for line in result.stdout.splitlines() if line.strip()]
 
+    # -- Container operations -------------------------------------------------
+
+    def container_exists(self, name: str) -> bool:
+        result = subprocess.run(
+            [
+                "docker",
+                "ps",
+                "-a",
+                "--filter",
+                f"name=^{name}$",
+                "--format",
+                "{{.Names}}",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return False
+        return name in result.stdout.splitlines()
+
+    def create_container(self, name: str, workspace: Path) -> bool:
+        result = subprocess.run(
+            [
+                "docker",
+                "run",
+                "-d",
+                "--name",
+                name,
+                "-v",
+                f"{workspace}:/workspace",
+                "-w",
+                "/workspace",
+                "ubuntu:latest",
+                "sleep",
+                "infinity",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0
+
+    def stop_container(self, name: str) -> bool:
+        result = subprocess.run(
+            ["docker", "rm", "-f", name],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0
+
 
 @dataclass
 class MockDockerBackend:
     """Returns canned responses for testing."""
 
     sandboxes: dict[str, bool] = field(default_factory=dict)
+    containers: dict[str, bool] = field(default_factory=dict)
     created: list[tuple[str, Path, str | None]] = field(default_factory=list)
+    containers_created: list[tuple[str, Path]] = field(default_factory=list)
     started: list[str] = field(default_factory=list)
     stopped: list[str] = field(default_factory=list)
+    containers_stopped: list[str] = field(default_factory=list)
     executed: list[tuple[str, str]] = field(default_factory=list)
     agents_run: list[tuple[str, Path, str]] = field(default_factory=list)
 
     fail_on: str | None = None
     exec_results: dict[str, tuple[int, str]] = field(default_factory=dict)
+
+    # -- Sandbox operations ---------------------------------------------------
 
     def sandbox_exists(self, name: str) -> bool:
         return name in self.sandboxes
@@ -168,6 +232,25 @@ class MockDockerBackend:
 
     def list_sandboxes(self) -> list[str]:
         return list(self.sandboxes.keys())
+
+    # -- Container operations -------------------------------------------------
+
+    def container_exists(self, name: str) -> bool:
+        return name in self.containers
+
+    def create_container(self, name: str, workspace: Path) -> bool:
+        if self.fail_on == "create_container":
+            return False
+        self.containers_created.append((name, workspace))
+        self.containers[name] = True
+        return True
+
+    def stop_container(self, name: str) -> bool:
+        if self.fail_on == "stop_container":
+            return False
+        self.containers_stopped.append(name)
+        self.containers.pop(name, None)
+        return True
 
 
 class DryRunDockerBackend:
@@ -213,3 +296,22 @@ class DryRunDockerBackend:
     def list_sandboxes(self) -> list[str]:
         self.commands.append("docker sandbox ls --format '{{.Name}}'")
         return []
+
+    # -- Container operations -------------------------------------------------
+
+    def container_exists(self, name: str) -> bool:
+        self.commands.append(
+            f"docker ps -a --filter 'name=^{name}$' --format '{{{{.Names}}}}'"
+        )
+        return False
+
+    def create_container(self, name: str, workspace: Path) -> bool:
+        self.commands.append(
+            f"docker run -d --name {name} -v {workspace}:/workspace "
+            f"-w /workspace ubuntu:latest sleep infinity"
+        )
+        return True
+
+    def stop_container(self, name: str) -> bool:
+        self.commands.append(f"docker rm -f {name}")
+        return True

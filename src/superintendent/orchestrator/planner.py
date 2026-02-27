@@ -30,7 +30,7 @@ class Planner:
 
     def create_plan(self, inputs: PlannerInput) -> WorkflowPlan:
         repo_name = self._extract_repo_name(inputs.repo)
-        sandbox_name = inputs.sandbox_name or f"claude-{repo_name}"
+        env_name = inputs.sandbox_name or f"claude-{repo_name}"
         branch = inputs.branch or f"agent/{repo_name}"
 
         metadata: dict[str, Any] = {
@@ -40,8 +40,11 @@ class Planner:
             "mode": inputs.mode,
             "target": inputs.target,
             "branch": branch,
-            "sandbox_name": sandbox_name,
         }
+        if inputs.target == "container":
+            metadata["container_name"] = env_name
+        else:
+            metadata["sandbox_name"] = env_name
         if inputs.context_file:
             metadata["context_file"] = inputs.context_file
 
@@ -85,68 +88,10 @@ class Planner:
             )
         )
 
-        if inputs.target in ("sandbox", "container"):
-            # Step 3: Prepare sandbox or container
-            if inputs.target == "container":
-                prep_id = "prepare_container"
-                prep_action = "prepare_container"
-                name_key = "container_name"
-            else:
-                prep_id = "prepare_sandbox"
-                prep_action = "prepare_sandbox"
-                name_key = "sandbox_name"
-
-            env_name = metadata["sandbox_name"]
-
-            steps.append(
-                WorkflowStep(
-                    id=prep_id,
-                    action=prep_action,
-                    params={
-                        name_key: env_name,
-                        "force": inputs.force,
-                    },
-                    depends_on=["create_worktree"],
-                )
-            )
-
-            # Step 4: Authenticate
-            steps.append(
-                WorkflowStep(
-                    id="authenticate",
-                    action="authenticate",
-                    params={
-                        name_key: env_name,
-                    },
-                    depends_on=[prep_id],
-                )
-            )
-
-            # Step 5: Initialize state (.ralph/ directory)
-            steps.append(
-                WorkflowStep(
-                    id="initialize_state",
-                    action="initialize_state",
-                    params={
-                        "task": inputs.task,
-                        "context_file": inputs.context_file,
-                    },
-                    depends_on=["authenticate"],
-                )
-            )
-
-            # Step 6: Start agent
-            steps.append(
-                WorkflowStep(
-                    id="start_agent",
-                    action="start_agent",
-                    params={
-                        name_key: env_name,
-                        "task": inputs.task,
-                    },
-                    depends_on=["initialize_state"],
-                )
-            )
+        if inputs.target == "container":
+            self._build_container_steps(steps, inputs, metadata)
+        elif inputs.target == "sandbox":
+            self._build_sandbox_steps(steps, inputs, metadata)
         else:
             # Local mode: no sandbox, no auth
             # Step 3: Initialize state
@@ -175,6 +120,106 @@ class Planner:
             )
 
         return steps
+
+    def _build_sandbox_steps(
+        self,
+        steps: list[WorkflowStep],
+        inputs: "PlannerInput",
+        metadata: dict[str, Any],
+    ) -> None:
+        sandbox_name = metadata["sandbox_name"]
+
+        steps.append(
+            WorkflowStep(
+                id="prepare_sandbox",
+                action="prepare_sandbox",
+                params={
+                    "sandbox_name": sandbox_name,
+                    "force": inputs.force,
+                },
+                depends_on=["create_worktree"],
+            )
+        )
+        steps.append(
+            WorkflowStep(
+                id="authenticate",
+                action="authenticate",
+                params={"sandbox_name": sandbox_name},
+                depends_on=["prepare_sandbox"],
+            )
+        )
+        steps.append(
+            WorkflowStep(
+                id="initialize_state",
+                action="initialize_state",
+                params={
+                    "task": inputs.task,
+                    "context_file": inputs.context_file,
+                },
+                depends_on=["authenticate"],
+            )
+        )
+        steps.append(
+            WorkflowStep(
+                id="start_agent",
+                action="start_agent",
+                params={
+                    "sandbox_name": sandbox_name,
+                    "task": inputs.task,
+                },
+                depends_on=["initialize_state"],
+            )
+        )
+
+    def _build_container_steps(
+        self,
+        steps: list[WorkflowStep],
+        inputs: "PlannerInput",
+        metadata: dict[str, Any],
+    ) -> None:
+        container_name = metadata["container_name"]
+
+        steps.append(
+            WorkflowStep(
+                id="prepare_container",
+                action="prepare_container",
+                params={
+                    "container_name": container_name,
+                    "force": inputs.force,
+                },
+                depends_on=["create_worktree"],
+            )
+        )
+        steps.append(
+            WorkflowStep(
+                id="authenticate",
+                action="authenticate",
+                params={"container_name": container_name},
+                depends_on=["prepare_container"],
+            )
+        )
+        steps.append(
+            WorkflowStep(
+                id="initialize_state",
+                action="initialize_state",
+                params={
+                    "task": inputs.task,
+                    "context_file": inputs.context_file,
+                },
+                depends_on=["authenticate"],
+            )
+        )
+        steps.append(
+            WorkflowStep(
+                id="start_agent",
+                action="start_agent",
+                params={
+                    "container_name": container_name,
+                    "task": inputs.task,
+                },
+                depends_on=["initialize_state"],
+            )
+        )
 
     @staticmethod
     def _extract_repo_name(repo: str) -> str:

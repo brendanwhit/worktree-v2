@@ -362,12 +362,14 @@ class TestPrepareContainerHandler:
         result = handler.execute(step)
 
         assert result.success is True
-        assert len(docker.created) == 1
-        assert docker.created[0][0] == "claude-test"
+        assert len(docker.containers_created) == 1
+        assert docker.containers_created[0][0] == "claude-test"
+        # Sandbox methods should NOT be called
+        assert len(docker.created) == 0
 
     def test_force_recreates_existing(self, tmp_path):
         """With force=True, stops existing container before recreating."""
-        docker = MockDockerBackend(sandboxes={"claude-test": True})
+        docker = MockDockerBackend(containers={"claude-test": True})
         ctx = ExecutionContext(backends=_mock_backends(docker=docker))
         ctx.step_outputs["create_worktree"] = {"worktree_path": str(tmp_path)}
         handler = RealStepHandler(ctx)
@@ -381,12 +383,14 @@ class TestPrepareContainerHandler:
         result = handler.execute(step)
 
         assert result.success is True
-        assert len(docker.stopped) == 1
-        assert len(docker.created) == 1
+        assert len(docker.containers_stopped) == 1
+        assert len(docker.containers_created) == 1
+        # Sandbox methods should NOT be called
+        assert len(docker.stopped) == 0
 
     def test_container_creation_fails(self, tmp_path):
-        """When docker backend fails for container, return failure."""
-        docker = MockDockerBackend(fail_on="create_sandbox")
+        """When docker.create_container fails, return failure."""
+        docker = MockDockerBackend(fail_on="create_container")
         ctx = ExecutionContext(backends=_mock_backends(docker=docker))
         ctx.step_outputs["create_worktree"] = {"worktree_path": str(tmp_path)}
         handler = RealStepHandler(ctx)

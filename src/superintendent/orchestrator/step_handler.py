@@ -120,12 +120,9 @@ class RealStepHandler:
             data={"worktree_path": str(worktree_path)},
         )
 
-    # -- Docker handlers (shared helper, sandbox, container) -------------------
+    # -- Docker handlers (prepare_sandbox) ------------------------------------
 
-    def _prepare_docker_env(
-        self, step: WorkflowStep, name_key: str, label: str
-    ) -> StepResult:
-        """Shared logic for preparing a Docker environment (sandbox or container)."""
+    def _handle_prepare_sandbox(self, step: WorkflowStep) -> StepResult:
         wt_output = self._context.step_outputs.get("create_worktree")
         if wt_output is None:
             return StepResult(
@@ -135,31 +132,57 @@ class RealStepHandler:
             )
 
         docker = self._context.backends.docker
-        name = step.params[name_key]
+        sandbox_name = step.params["sandbox_name"]
         force = step.params.get("force", False)
         workspace = Path(wt_output["worktree_path"])
 
-        if force and docker.sandbox_exists(name):
-            docker.stop_sandbox(name)
+        if force and docker.sandbox_exists(sandbox_name):
+            docker.stop_sandbox(sandbox_name)
 
-        if not docker.create_sandbox(name, workspace):
+        if not docker.create_sandbox(sandbox_name, workspace):
             return StepResult(
                 success=False,
                 step_id=step.id,
-                message=f"Failed to create {label}: {name}",
+                message=f"Failed to create sandbox: {sandbox_name}",
             )
 
         return StepResult(
             success=True,
             step_id=step.id,
-            data={name_key: name},
+            data={"sandbox_name": sandbox_name},
         )
 
-    def _handle_prepare_sandbox(self, step: WorkflowStep) -> StepResult:
-        return self._prepare_docker_env(step, "sandbox_name", "sandbox")
+    # -- Docker handlers (prepare_container) -----------------------------------
 
     def _handle_prepare_container(self, step: WorkflowStep) -> StepResult:
-        return self._prepare_docker_env(step, "container_name", "container")
+        wt_output = self._context.step_outputs.get("create_worktree")
+        if wt_output is None:
+            return StepResult(
+                success=False,
+                step_id=step.id,
+                message="Missing create_worktree output (worktree_path)",
+            )
+
+        docker = self._context.backends.docker
+        container_name = step.params["container_name"]
+        force = step.params.get("force", False)
+        workspace = Path(wt_output["worktree_path"])
+
+        if force and docker.container_exists(container_name):
+            docker.stop_container(container_name)
+
+        if not docker.create_container(container_name, workspace):
+            return StepResult(
+                success=False,
+                step_id=step.id,
+                message=f"Failed to create container: {container_name}",
+            )
+
+        return StepResult(
+            success=True,
+            step_id=step.id,
+            data={"container_name": container_name},
+        )
 
     # -- Auth handler (authenticate) ------------------------------------------
 

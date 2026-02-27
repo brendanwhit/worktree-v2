@@ -129,6 +129,15 @@ class TestPlanner:
         assert "container_name" in agent_step.params
         assert "sandbox_name" not in agent_step.params
 
+    def test_container_metadata_uses_container_name(self):
+        planner = Planner()
+        plan = planner.create_plan(
+            PlannerInput(repo="/test/repo", task="test", target="container")
+        )
+        assert "container_name" in plan.metadata
+        assert "sandbox_name" not in plan.metadata
+        assert plan.metadata["container_name"] == "claude-repo"
+
     def test_sandbox_steps_use_sandbox_name_param(self):
         planner = Planner()
         plan = planner.create_plan(
