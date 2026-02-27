@@ -112,6 +112,32 @@ class TestPlanner:
         auth_step = plan.get_step("authenticate")
         assert auth_step.depends_on == ["prepare_container"]
 
+    def test_container_steps_use_container_name_param(self):
+        planner = Planner()
+        plan = planner.create_plan(
+            PlannerInput(repo="/test/repo", task="test", target="container")
+        )
+        prep_step = plan.get_step("prepare_container")
+        assert "container_name" in prep_step.params
+        assert "sandbox_name" not in prep_step.params
+
+        auth_step = plan.get_step("authenticate")
+        assert "container_name" in auth_step.params
+        assert "sandbox_name" not in auth_step.params
+
+        agent_step = plan.get_step("start_agent")
+        assert "container_name" in agent_step.params
+        assert "sandbox_name" not in agent_step.params
+
+    def test_sandbox_steps_use_sandbox_name_param(self):
+        planner = Planner()
+        plan = planner.create_plan(
+            PlannerInput(repo="/test/repo", task="test", target="sandbox")
+        )
+        prep_step = plan.get_step("prepare_sandbox")
+        assert "sandbox_name" in prep_step.params
+        assert "container_name" not in prep_step.params
+
     def test_sandbox_target_still_uses_prepare_sandbox(self):
         planner = Planner()
         plan = planner.create_plan(

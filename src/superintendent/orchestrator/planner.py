@@ -90,16 +90,20 @@ class Planner:
             if inputs.target == "container":
                 prep_id = "prepare_container"
                 prep_action = "prepare_container"
+                name_key = "container_name"
             else:
                 prep_id = "prepare_sandbox"
                 prep_action = "prepare_sandbox"
+                name_key = "sandbox_name"
+
+            env_name = metadata["sandbox_name"]
 
             steps.append(
                 WorkflowStep(
                     id=prep_id,
                     action=prep_action,
                     params={
-                        "sandbox_name": metadata["sandbox_name"],
+                        name_key: env_name,
                         "force": inputs.force,
                     },
                     depends_on=["create_worktree"],
@@ -112,7 +116,7 @@ class Planner:
                     id="authenticate",
                     action="authenticate",
                     params={
-                        "sandbox_name": metadata["sandbox_name"],
+                        name_key: env_name,
                     },
                     depends_on=[prep_id],
                 )
@@ -137,7 +141,7 @@ class Planner:
                     id="start_agent",
                     action="start_agent",
                     params={
-                        "sandbox_name": metadata["sandbox_name"],
+                        name_key: env_name,
                         "task": inputs.task,
                     },
                     depends_on=["initialize_state"],
