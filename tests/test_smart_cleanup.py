@@ -47,7 +47,7 @@ class TestAnalyzeEntry:
         wt = tmp_path / "wt"
         wt.mkdir()
         entry = _make_entry(worktree_path=str(wt), branch="stale-branch")
-        git = MockGitBackend(stale_branches={"stale-branch"})
+        git = MockGitBackend(branch_ages={"stale-branch": 60.0})
         candidate = analyze_entry(entry, git)
         assert candidate is not None
         assert any("stale" in r for r in candidate.reasons)

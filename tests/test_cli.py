@@ -3,10 +3,15 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
+from superintendent.backends.git import MockGitBackend
 from superintendent.cli.main import (
+    _branch_to_slug,
     app,
+    auto_create_worktree,
+    check_and_merge_stale,
     cleanup_all,
     cleanup_by_name,
     list_entries,
@@ -426,6 +431,46 @@ class TestResumeCommand:
             result = runner.invoke(app, ["resume", "--name", "nonexistent"])
             assert result.exit_code == 1
 
+    def test_resume_by_branch(self, tmp_path: Path) -> None:
+        registry = WorktreeRegistry(tmp_path / "registry.json")
+        wt_path = tmp_path / "worktree"
+        wt_path.mkdir()
+        registry.add(
+            WorktreeEntry(
+                name="my-worktree",
+                repo="/tmp/repo",
+                branch="feature/cool-feature",
+                worktree_path=str(wt_path),
+                sandbox_name="claude-test",
+            )
+        )
+        with patch(
+            "superintendent.cli.main.get_default_registry", return_value=registry
+        ):
+            result = runner.invoke(app, ["resume", "--name", "feature/cool-feature"])
+            assert result.exit_code == 0
+            assert "Resuming" in result.output
+
+    def test_resume_not_found_shows_available(self, tmp_path: Path) -> None:
+        registry = WorktreeRegistry(tmp_path / "registry.json")
+        wt_path = tmp_path / "worktree"
+        wt_path.mkdir()
+        registry.add(
+            WorktreeEntry(
+                name="existing",
+                repo="/tmp/repo",
+                branch="main",
+                worktree_path=str(wt_path),
+            )
+        )
+        with patch(
+            "superintendent.cli.main.get_default_registry", return_value=registry
+        ):
+            result = runner.invoke(app, ["resume", "--name", "nonexistent"])
+            assert result.exit_code == 1
+            assert "searched by name and branch" in result.output
+            assert "existing" in result.output
+
 
 class TestCleanupCommand:
     """Test the 'cleanup' subcommand."""
@@ -528,6 +573,50 @@ class TestBusinessLogicFunctions:
         )
         assert resume_entry("stale", registry) is None
 
+    def test_resume_entry_by_branch(self, tmp_path: Path) -> None:
+        registry = WorktreeRegistry(tmp_path / "registry.json")
+        wt_path = tmp_path / "worktree"
+        wt_path.mkdir()
+        registry.add(
+            WorktreeEntry(
+                name="my-worktree",
+                repo="/tmp/repo",
+                branch="feature/cool",
+                worktree_path=str(wt_path),
+            )
+        )
+        # Look up by branch name, not entry name
+        entry = resume_entry("feature/cool", registry)
+        assert entry is not None
+        assert entry.name == "my-worktree"
+
+    def test_resume_entry_name_takes_precedence(self, tmp_path: Path) -> None:
+        registry = WorktreeRegistry(tmp_path / "registry.json")
+        wt_path1 = tmp_path / "wt1"
+        wt_path1.mkdir()
+        wt_path2 = tmp_path / "wt2"
+        wt_path2.mkdir()
+        registry.add(
+            WorktreeEntry(
+                name="name-match",
+                repo="/tmp/repo1",
+                branch="some-branch",
+                worktree_path=str(wt_path1),
+            )
+        )
+        registry.add(
+            WorktreeEntry(
+                name="other",
+                repo="/tmp/repo2",
+                branch="name-match",
+                worktree_path=str(wt_path2),
+            )
+        )
+        # "name-match" matches both a name and a branch; name should win
+        entry = resume_entry("name-match", registry)
+        assert entry is not None
+        assert entry.repo == "/tmp/repo1"
+
     def test_cleanup_by_name_found(self, tmp_path: Path) -> None:
         registry = WorktreeRegistry(tmp_path / "registry.json")
         registry.add(
@@ -595,3 +684,260 @@ class TestBusinessLogicFunctions:
         removed = cleanup_all(registry, dry_run=True)
         assert "stale" in removed
         assert registry.get("stale") is not None
+
+
+class TestBranchToSlug:
+    """Test the _branch_to_slug helper."""
+
+    def test_simple_branch(self) -> None:
+        assert _branch_to_slug("main") == "main"
+
+    def test_slash_branch(self) -> None:
+        assert _branch_to_slug("feature/my-feature") == "feature-my-feature"
+
+    def test_multiple_slashes(self) -> None:
+        assert _branch_to_slug("user/feature/thing") == "user-feature-thing"
+
+    def test_special_chars(self) -> None:
+        assert _branch_to_slug("fix@bug#123") == "fix-bug-123"
+
+    def test_consecutive_dashes(self) -> None:
+        assert _branch_to_slug("a//b") == "a-b"
+
+
+class TestAutoCreateWorktree:
+    """Test the auto_create_worktree function."""
+
+    def test_creates_worktree_for_existing_branch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        registry = WorktreeRegistry(tmp_path / "registry.json")
+        repo_path = tmp_path / "repo"
+        repo_path.mkdir()
+        (repo_path / ".git").mkdir()
+
+        # Mock the worktrees dir so we don't touch real home
+        worktrees_base = tmp_path / "worktrees"
+        monkeypatch.setattr(
+            "superintendent.cli.main._default_worktrees_dir",
+            lambda: worktrees_base,
+        )
+
+        git = MockGitBackend(
+            local_repos={str(repo_path): repo_path},
+            known_branches={"feature/cool"},
+        )
+        # Mock create_worktree_from_existing to also create the directory
+        original = git.create_worktree_from_existing
+
+        def mock_create(repo: Path, branch: str, target: Path) -> bool:
+            target.mkdir(parents=True, exist_ok=True)
+            return original(repo, branch, target)
+
+        git.create_worktree_from_existing = mock_create
+
+        entry = auto_create_worktree("feature/cool", str(repo_path), registry, git)
+        assert entry is not None
+        assert entry.branch == "feature/cool"
+        assert entry.name == "feature-cool"
+        assert "repo" in entry.worktree_path
+        # Should be registered
+        assert registry.get("feature-cool") is not None
+
+    def test_returns_none_when_branch_missing(self, tmp_path: Path) -> None:
+        registry = WorktreeRegistry(tmp_path / "registry.json")
+        repo_path = tmp_path / "repo"
+        repo_path.mkdir()
+        (repo_path / ".git").mkdir()
+        git = MockGitBackend(
+            local_repos={str(repo_path): repo_path},
+            known_branches=set(),
+        )
+        entry = auto_create_worktree(
+            "nonexistent-branch", str(repo_path), registry, git
+        )
+        assert entry is None
+
+    def test_returns_none_when_repo_not_found(self, tmp_path: Path) -> None:
+        registry = WorktreeRegistry(tmp_path / "registry.json")
+        git = MockGitBackend()
+        entry = auto_create_worktree("feature/x", "/no/such/repo", registry, git)
+        assert entry is None
+
+    def test_returns_none_when_worktree_creation_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        registry = WorktreeRegistry(tmp_path / "registry.json")
+        repo_path = tmp_path / "repo"
+        repo_path.mkdir()
+        (repo_path / ".git").mkdir()
+
+        worktrees_base = tmp_path / "worktrees"
+        monkeypatch.setattr(
+            "superintendent.cli.main._default_worktrees_dir",
+            lambda: worktrees_base,
+        )
+
+        git = MockGitBackend(
+            local_repos={str(repo_path): repo_path},
+            known_branches={"feature/x"},
+            fail_on="create_worktree_from_existing",
+        )
+        entry = auto_create_worktree("feature/x", str(repo_path), registry, git)
+        assert entry is None
+
+    def test_registers_existing_worktree_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If the worktree directory already exists, just register it."""
+        registry = WorktreeRegistry(tmp_path / "registry.json")
+        repo_path = tmp_path / "repo"
+        repo_path.mkdir()
+        (repo_path / ".git").mkdir()
+
+        worktrees_base = tmp_path / "worktrees"
+        wt_dir = worktrees_base / "repo" / "feature-x"
+        wt_dir.mkdir(parents=True)
+        monkeypatch.setattr(
+            "superintendent.cli.main._default_worktrees_dir",
+            lambda: worktrees_base,
+        )
+
+        git = MockGitBackend(
+            local_repos={str(repo_path): repo_path},
+            known_branches={"feature/x"},
+        )
+        entry = auto_create_worktree("feature/x", str(repo_path), registry, git)
+        assert entry is not None
+        assert entry.worktree_path == str(wt_dir)
+        # create_worktree_from_existing should NOT have been called
+        assert len(git.worktrees) == 0
+
+
+class TestCheckAndMergeStale:
+    """Test the check_and_merge_stale function."""
+
+    def test_not_stale_returns_none(self, tmp_path: Path) -> None:
+        wt_path = tmp_path / "worktree"
+        wt_path.mkdir()
+        entry = WorktreeEntry(
+            name="wt",
+            repo="/repo",
+            branch="feature/x",
+            worktree_path=str(wt_path),
+        )
+        git = MockGitBackend(branch_ages={"feature/x": 3.0})
+        result = check_and_merge_stale(entry, git)
+        assert result is None
+
+    def test_stale_merges_successfully(self, tmp_path: Path) -> None:
+        wt_path = tmp_path / "worktree"
+        wt_path.mkdir()
+        entry = WorktreeEntry(
+            name="wt",
+            repo="/repo",
+            branch="feature/old",
+            worktree_path=str(wt_path),
+        )
+        git = MockGitBackend(branch_ages={"feature/old": 10.0})
+        result = check_and_merge_stale(entry, git)
+        assert result is not None
+        assert "merged main successfully" in result
+        assert "10 days stale" in result
+        assert len(git.fetched) == 1
+        assert len(git.merges) == 1
+
+    def test_stale_merge_conflict(self, tmp_path: Path) -> None:
+        wt_path = tmp_path / "worktree"
+        wt_path.mkdir()
+        entry = WorktreeEntry(
+            name="wt",
+            repo="/repo",
+            branch="feature/conflict",
+            worktree_path=str(wt_path),
+        )
+        git = MockGitBackend(
+            branch_ages={"feature/conflict": 14.0},
+            fail_on="merge_branch",
+        )
+        result = check_and_merge_stale(entry, git)
+        assert result is not None
+        assert "conflicts" in result
+        assert "auto-aborted" in result
+
+    def test_stale_fetch_fails(self, tmp_path: Path) -> None:
+        wt_path = tmp_path / "worktree"
+        wt_path.mkdir()
+        entry = WorktreeEntry(
+            name="wt",
+            repo="/repo",
+            branch="feature/x",
+            worktree_path=str(wt_path),
+        )
+        git = MockGitBackend(
+            branch_ages={"feature/x": 10.0},
+            fail_on="fetch",
+        )
+        result = check_and_merge_stale(entry, git)
+        assert result is not None
+        assert "fetch failed" in result
+
+    def test_unknown_branch_age_returns_none(self, tmp_path: Path) -> None:
+        wt_path = tmp_path / "worktree"
+        wt_path.mkdir()
+        entry = WorktreeEntry(
+            name="wt",
+            repo="/repo",
+            branch="feature/x",
+            worktree_path=str(wt_path),
+        )
+        git = MockGitBackend()  # no branch_ages
+        result = check_and_merge_stale(entry, git)
+        assert result is None
+
+    def test_missing_worktree_path_returns_none(self) -> None:
+        entry = WorktreeEntry(
+            name="wt",
+            repo="/repo",
+            branch="feature/x",
+            worktree_path="/nonexistent",
+        )
+        git = MockGitBackend(branch_ages={"feature/x": 10.0})
+        result = check_and_merge_stale(entry, git)
+        assert result is None
+
+    def test_custom_stale_threshold(self, tmp_path: Path) -> None:
+        wt_path = tmp_path / "worktree"
+        wt_path.mkdir()
+        entry = WorktreeEntry(
+            name="wt",
+            repo="/repo",
+            branch="feature/x",
+            worktree_path=str(wt_path),
+        )
+        git = MockGitBackend(branch_ages={"feature/x": 3.0})
+        # With default threshold (7 days), 3 days should NOT be stale
+        assert check_and_merge_stale(entry, git) is None
+        # With threshold of 2 days, 3 days IS stale
+        result = check_and_merge_stale(entry, git, stale_days=2.0)
+        assert result is not None
+        assert "merged main successfully" in result
+
+    def test_uses_detected_default_branch(self, tmp_path: Path) -> None:
+        wt_path = tmp_path / "worktree"
+        wt_path.mkdir()
+        entry = WorktreeEntry(
+            name="wt",
+            repo="/repo",
+            branch="feature/x",
+            worktree_path=str(wt_path),
+        )
+        git = MockGitBackend(
+            branch_ages={"feature/x": 10.0},
+            default_branch="develop",
+        )
+        result = check_and_merge_stale(entry, git)
+        assert result is not None
+        assert "merged develop successfully" in result
+        # Should merge origin/develop, not origin/main
+        assert git.merges[0][1] == "origin/develop"

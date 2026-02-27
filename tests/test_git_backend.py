@@ -9,6 +9,7 @@ from superintendent.backends.git import (
     GitBackend,
     MockGitBackend,
     RealGitBackend,
+    WorktreeInfo,
     _extract_repo_name,
     _find_local_clone,
     _is_git_repo,
@@ -117,6 +118,79 @@ class TestMockGitBackend:
         assert len(backend.cloned) == 2
         assert len(backend.fetched) == 1
 
+    def test_list_worktrees(self):
+        wt = WorktreeInfo(path=Path("/wt"), branch="main")
+        backend = MockGitBackend(known_worktrees=[wt])
+        result = backend.list_worktrees(Path("/repo"))
+        assert len(result) == 1
+        assert result[0].branch == "main"
+
+    def test_list_worktrees_failure(self):
+        backend = MockGitBackend(fail_on="list_worktrees")
+        assert backend.list_worktrees(Path("/repo")) == []
+
+    def test_branch_exists_true(self):
+        backend = MockGitBackend(known_branches={"feature/x"})
+        assert backend.branch_exists(Path("/repo"), "feature/x") is True
+
+    def test_branch_exists_false(self):
+        backend = MockGitBackend()
+        assert backend.branch_exists(Path("/repo"), "no-branch") is False
+
+    def test_branch_exists_failure(self):
+        backend = MockGitBackend(fail_on="branch_exists", known_branches={"feature/x"})
+        assert backend.branch_exists(Path("/repo"), "feature/x") is False
+
+    def test_create_worktree_from_existing(self):
+        backend = MockGitBackend()
+        result = backend.create_worktree_from_existing(
+            Path("/repo"), "feature/x", Path("/wt")
+        )
+        assert result is True
+        assert len(backend.worktrees) == 1
+
+    def test_create_worktree_from_existing_failure(self):
+        backend = MockGitBackend(fail_on="create_worktree_from_existing")
+        result = backend.create_worktree_from_existing(
+            Path("/repo"), "feature/x", Path("/wt")
+        )
+        assert result is False
+
+    def test_get_branch_age_days(self):
+        backend = MockGitBackend(branch_ages={"main": 10.5})
+        result = backend.get_branch_age_days(Path("/repo"), "main")
+        assert result == 10.5
+
+    def test_get_branch_age_days_unknown(self):
+        backend = MockGitBackend()
+        result = backend.get_branch_age_days(Path("/repo"), "main")
+        assert result is None
+
+    def test_get_branch_age_days_failure(self):
+        backend = MockGitBackend(
+            fail_on="get_branch_age_days", branch_ages={"main": 5.0}
+        )
+        assert backend.get_branch_age_days(Path("/repo"), "main") is None
+
+    def test_merge_branch(self):
+        backend = MockGitBackend()
+        result = backend.merge_branch(Path("/repo"), "main")
+        assert result is True
+        assert backend.merges == [(Path("/repo"), "main")]
+
+    def test_merge_branch_failure(self):
+        backend = MockGitBackend(fail_on="merge_branch")
+        assert backend.merge_branch(Path("/repo"), "main") is False
+        assert backend.merges == []
+
+    def test_get_default_branch(self):
+        backend = MockGitBackend(default_branch="master")
+        assert backend.get_default_branch(Path("/repo")) == "master"
+
+    def test_get_default_branch_default(self):
+        backend = MockGitBackend()
+        assert backend.get_default_branch(Path("/repo")) == "main"
+
 
 class TestDryRunGitBackend:
     """Test DryRunGitBackend command recording."""
@@ -176,6 +250,47 @@ class TestDryRunGitBackend:
         backend.fetch(Path("/r"))
         backend.checkout(Path("/r"), "main")
         assert len(backend.commands) == 3
+
+    def test_list_worktrees_records_command(self):
+        backend = DryRunGitBackend()
+        result = backend.list_worktrees(Path("/repo"))
+        assert result == []
+        assert "worktree list" in backend.commands[0]
+
+    def test_branch_exists_records_command(self):
+        backend = DryRunGitBackend()
+        result = backend.branch_exists(Path("/repo"), "feature/x")
+        assert result is True
+        assert "rev-parse" in backend.commands[0]
+        assert "feature/x" in backend.commands[0]
+
+    def test_create_worktree_from_existing_records_command(self):
+        backend = DryRunGitBackend()
+        result = backend.create_worktree_from_existing(
+            Path("/repo"), "feature/x", Path("/wt")
+        )
+        assert result is True
+        assert "worktree add" in backend.commands[0]
+        assert "feature/x" in backend.commands[0]
+
+    def test_get_branch_age_days_records_command(self):
+        backend = DryRunGitBackend()
+        result = backend.get_branch_age_days(Path("/repo"), "main")
+        assert result == 0.0
+        assert "log -1" in backend.commands[0]
+        assert "main" in backend.commands[0]
+
+    def test_merge_branch_records_command(self):
+        backend = DryRunGitBackend()
+        result = backend.merge_branch(Path("/repo"), "origin/main")
+        assert result is True
+        assert "merge origin/main" in backend.commands[0]
+
+    def test_get_default_branch_records_command(self):
+        backend = DryRunGitBackend()
+        result = backend.get_default_branch(Path("/repo"))
+        assert result == "main"
+        assert "symbolic-ref" in backend.commands[0]
 
 
 class TestRealGitBackend:
@@ -356,6 +471,149 @@ class TestRealGitBackend:
         # fetch --all on a repo with no remotes still returns 0
         result = backend.fetch(repo_path)
         assert result is True
+
+    @pytest.mark.integration
+    def test_list_worktrees(self, tmp_path):
+        """Integration test: list worktrees of a repo."""
+        import subprocess
+
+        repo_path = tmp_path / "repo"
+        subprocess.run(["git", "init", str(repo_path)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(repo_path), "config", "user.email", "test@test.com"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_path), "config", "user.name", "Test"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_path), "commit", "--allow-empty", "-m", "init"],
+            check=True,
+            capture_output=True,
+        )
+
+        backend = RealGitBackend()
+        worktrees = backend.list_worktrees(repo_path)
+        # At least the main worktree should be listed
+        assert len(worktrees) >= 1
+        assert worktrees[0].path == repo_path
+
+    @pytest.mark.integration
+    def test_list_worktrees_with_additional(self, tmp_path):
+        """Integration test: list worktrees including an added worktree."""
+        import subprocess
+
+        repo_path = tmp_path / "repo"
+        subprocess.run(["git", "init", str(repo_path)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(repo_path), "config", "user.email", "test@test.com"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_path), "config", "user.name", "Test"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_path), "commit", "--allow-empty", "-m", "init"],
+            check=True,
+            capture_output=True,
+        )
+        wt_path = tmp_path / "wt"
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "worktree",
+                "add",
+                str(wt_path),
+                "-b",
+                "test-branch",
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+        backend = RealGitBackend()
+        worktrees = backend.list_worktrees(repo_path)
+        branches = [wt.branch for wt in worktrees]
+        assert "test-branch" in branches
+
+    @pytest.mark.integration
+    def test_branch_exists_local(self, tmp_path):
+        """Integration test: check local branch exists."""
+        import subprocess
+
+        repo_path = tmp_path / "repo"
+        subprocess.run(["git", "init", str(repo_path)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(repo_path), "config", "user.email", "test@test.com"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_path), "config", "user.name", "Test"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_path), "commit", "--allow-empty", "-m", "init"],
+            check=True,
+            capture_output=True,
+        )
+
+        backend = RealGitBackend()
+        # Default branch should exist (either main or master)
+        result = subprocess.run(
+            ["git", "-C", str(repo_path), "branch", "--show-current"],
+            capture_output=True,
+            text=True,
+        )
+        default_branch = result.stdout.strip()
+        assert backend.branch_exists(repo_path, default_branch) is True
+        assert backend.branch_exists(repo_path, "nonexistent-branch") is False
+
+    @pytest.mark.integration
+    def test_create_worktree_from_existing(self, tmp_path):
+        """Integration test: create worktree from an existing branch."""
+        import subprocess
+
+        repo_path = tmp_path / "repo"
+        subprocess.run(["git", "init", str(repo_path)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(repo_path), "config", "user.email", "test@test.com"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_path), "config", "user.name", "Test"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_path), "commit", "--allow-empty", "-m", "init"],
+            check=True,
+            capture_output=True,
+        )
+        # Create a branch
+        subprocess.run(
+            ["git", "-C", str(repo_path), "branch", "existing-branch"],
+            check=True,
+            capture_output=True,
+        )
+
+        backend = RealGitBackend()
+        wt_path = tmp_path / "wt"
+        result = backend.create_worktree_from_existing(
+            repo_path, "existing-branch", wt_path
+        )
+        assert result is True
+        assert wt_path.exists()
 
 
 class TestHelperFunctions:

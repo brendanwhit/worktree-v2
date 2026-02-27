@@ -313,3 +313,47 @@ class TestWorktreeRegistry:
         registry_path = tmp_path / "worktree-registry.json"
         reg = WorktreeRegistry(registry_path)
         assert reg.get("nope") is None
+
+    def test_get_by_branch(self, tmp_path: Path):
+        registry_path = tmp_path / "worktree-registry.json"
+        reg = WorktreeRegistry(registry_path)
+        reg.add(
+            WorktreeEntry(
+                name="wt-1",
+                repo="repo",
+                branch="feature/my-feature",
+                worktree_path="/tmp/wt-1",
+            )
+        )
+        entry = reg.get_by_branch("feature/my-feature")
+        assert entry is not None
+        assert entry.name == "wt-1"
+        assert entry.branch == "feature/my-feature"
+
+    def test_get_by_branch_nonexistent(self, tmp_path: Path):
+        registry_path = tmp_path / "worktree-registry.json"
+        reg = WorktreeRegistry(registry_path)
+        assert reg.get_by_branch("no-such-branch") is None
+
+    def test_get_by_branch_returns_first_match(self, tmp_path: Path):
+        registry_path = tmp_path / "worktree-registry.json"
+        reg = WorktreeRegistry(registry_path)
+        reg.add(
+            WorktreeEntry(
+                name="wt-1",
+                repo="repo-a",
+                branch="shared-branch",
+                worktree_path="/tmp/wt-1",
+            )
+        )
+        reg.add(
+            WorktreeEntry(
+                name="wt-2",
+                repo="repo-b",
+                branch="shared-branch",
+                worktree_path="/tmp/wt-2",
+            )
+        )
+        entry = reg.get_by_branch("shared-branch")
+        assert entry is not None
+        assert entry.name == "wt-1"

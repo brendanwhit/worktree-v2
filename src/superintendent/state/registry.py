@@ -72,6 +72,13 @@ class WorktreeRegistry:
                 return entry
         return None
 
+    def get_by_branch(self, branch: str) -> WorktreeEntry | None:
+        """Look up an entry by branch name."""
+        for entry in self._load():
+            if entry.branch == branch:
+                return entry
+        return None
+
     def add(self, entry: WorktreeEntry) -> None:
         """Add or replace an entry (keyed by name)."""
         entries = [e for e in self._load() if e.name != entry.name]
