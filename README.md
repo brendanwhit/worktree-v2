@@ -31,17 +31,14 @@ Key design principles:
 git clone https://github.com/brendanwhit/superintendent.git
 cd superintendent
 
-# Install dependencies
+# Install as a tool (makes `superintendent` and `sup` available globally)
+uv tool install .
+
+# Or install for development
 uv sync --dev
 
 # Verify installation
-uv run superintendent --help
-```
-
-The CLI is available as both `superintendent` and `sup`:
-
-```bash
-uv run sup --help
+superintendent --help
 ```
 
 ## Quick Start

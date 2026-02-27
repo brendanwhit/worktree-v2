@@ -81,8 +81,7 @@ superintendent/
 ├── src/
 │   └── superintendent/
 │       ├── cli/              # Typer entry point (main.py)
-│       ├── orchestrator/     # Planner, Executor, StepHandler
-│       │   └── sources/      # TaskSource: Beads, Markdown, Single
+│       ├── orchestrator/     # Planner, Executor, StepHandler, sources/
 │       ├── backends/         # Docker, Git, Terminal, Auth abstractions
 │       └── state/            # WorkflowState, .ralph/, registry, checkpoints
 ├── tests/                    # Unit, integration, e2e tests
