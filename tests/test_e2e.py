@@ -250,7 +250,7 @@ class TestE2EDryRunContainer:
     """E2E: CLI dry-run for container target produces correct plan."""
 
     def test_dry_run_container_plan_has_six_steps(self) -> None:
-        """Container mode produces same 6-step structure as sandbox."""
+        """Container mode produces 6-step structure."""
         result = runner.invoke(
             app,
             [
@@ -271,6 +271,82 @@ class TestE2EDryRunContainer:
         plan_data = json.loads(json_text)
 
         assert len(plan_data["steps"]) == 6
+
+    def test_dry_run_container_uses_prepare_container(self) -> None:
+        """Container plan uses prepare_container action, not prepare_sandbox."""
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "autonomous",
+                "container",
+                "--repo",
+                "/tmp/test-repo",
+                "--task",
+                "fix bug",
+                "--dry-run",
+            ],
+        )
+        lines = result.output.strip().split("\n")
+        json_text = "\n".join(lines[1:])
+        plan_data = json.loads(json_text)
+
+        actions = [s["action"] for s in plan_data["steps"]]
+        assert "prepare_container" in actions
+        assert "prepare_sandbox" not in actions
+
+    def test_dry_run_container_metadata_has_container_name(self) -> None:
+        """Container plan metadata uses container_name, not sandbox_name."""
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "autonomous",
+                "container",
+                "--repo",
+                "/tmp/test-repo",
+                "--task",
+                "fix bug",
+                "--dry-run",
+            ],
+        )
+        lines = result.output.strip().split("\n")
+        json_text = "\n".join(lines[1:])
+        plan_data = json.loads(json_text)
+
+        metadata = plan_data["metadata"]
+        assert "container_name" in metadata
+        assert "sandbox_name" not in metadata
+        assert metadata["container_name"] == "claude-test-repo"
+
+    def test_dry_run_container_steps_use_container_name_param(self) -> None:
+        """Container plan steps use container_name param, not sandbox_name."""
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "autonomous",
+                "container",
+                "--repo",
+                "/tmp/test-repo",
+                "--task",
+                "fix bug",
+                "--dry-run",
+            ],
+        )
+        lines = result.output.strip().split("\n")
+        json_text = "\n".join(lines[1:])
+        plan_data = json.loads(json_text)
+
+        prep_step = next(
+            s for s in plan_data["steps"] if s["action"] == "prepare_container"
+        )
+        assert "container_name" in prep_step["params"]
+        assert "sandbox_name" not in prep_step["params"]
+
+        agent_step = next(s for s in plan_data["steps"] if s["action"] == "start_agent")
+        assert "container_name" in agent_step["params"]
+        assert "sandbox_name" not in agent_step["params"]
 
 
 class TestE2EURLRepo:

@@ -237,7 +237,7 @@ class TestContainerFlowIntegration:
     """Full container workflow: planner -> executor -> mock backends."""
 
     def test_container_plan_completes_six_steps(self, tmp_path: Path) -> None:
-        """A container plan creates 6 steps like sandbox mode."""
+        """A container plan creates 6 steps and all complete successfully."""
         repo_path = tmp_path / "my-repo"
         git = MockGitBackend(local_repos={str(repo_path): repo_path})
         docker = MockDockerBackend()
@@ -254,6 +254,134 @@ class TestContainerFlowIntegration:
         assert result.error is None
         assert len(result.completed_steps) == 6
         assert result.state == WorkflowState.AGENT_RUNNING
+
+    def test_container_flow_uses_create_container_not_sandbox(
+        self, tmp_path: Path
+    ) -> None:
+        """Container target calls docker.create_container, not create_sandbox."""
+        repo_path = tmp_path / "my-repo"
+        git = MockGitBackend(local_repos={str(repo_path): repo_path})
+        docker = MockDockerBackend()
+        backends = _mock_backends(git=git, docker=docker)
+        ctx = ExecutionContext(backends=backends)
+        handler = RealStepHandler(ctx)
+        executor = Executor(handler=handler)
+
+        plan = Planner().create_plan(
+            PlannerInput(repo=str(repo_path), task="fix bug", target="container")
+        )
+        executor.run(plan)
+
+        assert len(docker.containers_created) == 1
+        assert len(docker.created) == 0  # no sandbox created
+        assert docker.containers_created[0][0].startswith("claude-")
+
+    def test_container_flow_authenticates_with_container_name(
+        self, tmp_path: Path
+    ) -> None:
+        """Container flow passes container_name to auth, not sandbox_name."""
+        repo_path = tmp_path / "my-repo"
+        git = MockGitBackend(local_repos={str(repo_path): repo_path})
+        auth = MockAuthBackend()
+        backends = _mock_backends(git=git, auth=auth)
+        ctx = ExecutionContext(backends=backends)
+        handler = RealStepHandler(ctx)
+        executor = Executor(handler=handler)
+
+        plan = Planner().create_plan(
+            PlannerInput(repo=str(repo_path), task="fix bug", target="container")
+        )
+        executor.run(plan)
+
+        assert len(auth.git_auths) == 1
+        assert auth.git_auths[0].startswith("claude-")
+
+    def test_container_flow_runs_agent_with_container_name(
+        self, tmp_path: Path
+    ) -> None:
+        """Container flow uses container_name for docker.run_agent."""
+        repo_path = tmp_path / "my-repo"
+        git = MockGitBackend(local_repos={str(repo_path): repo_path})
+        docker = MockDockerBackend()
+        backends = _mock_backends(git=git, docker=docker)
+        ctx = ExecutionContext(backends=backends)
+        handler = RealStepHandler(ctx)
+        executor = Executor(handler=handler)
+
+        plan = Planner().create_plan(
+            PlannerInput(repo=str(repo_path), task="fix bug", target="container")
+        )
+        executor.run(plan)
+
+        assert len(docker.agents_run) == 1
+        assert docker.agents_run[0][0].startswith("claude-")
+
+    def test_container_custom_name(self, tmp_path: Path) -> None:
+        """Custom sandbox_name is used as container_name for container target."""
+        repo_path = tmp_path / "my-repo"
+        git = MockGitBackend(local_repos={str(repo_path): repo_path})
+        docker = MockDockerBackend()
+        backends = _mock_backends(git=git, docker=docker)
+        ctx = ExecutionContext(backends=backends)
+        handler = RealStepHandler(ctx)
+        executor = Executor(handler=handler)
+
+        plan = Planner().create_plan(
+            PlannerInput(
+                repo=str(repo_path),
+                task="fix bug",
+                target="container",
+                sandbox_name="my-container",
+            )
+        )
+        result = executor.run(plan)
+
+        assert result.error is None
+        assert docker.containers_created[0][0] == "my-container"
+        assert docker.agents_run[0][0] == "my-container"
+
+    def test_container_force_stops_existing(self, tmp_path: Path) -> None:
+        """With force=True, container target stops existing container."""
+        repo_path = tmp_path / "my-repo"
+        git = MockGitBackend(local_repos={str(repo_path): repo_path})
+        docker = MockDockerBackend(containers={"claude-my-repo": True})
+        backends = _mock_backends(git=git, docker=docker)
+        ctx = ExecutionContext(backends=backends)
+        handler = RealStepHandler(ctx)
+        executor = Executor(handler=handler)
+
+        plan = Planner().create_plan(
+            PlannerInput(
+                repo=str(repo_path), task="fix bug", target="container", force=True
+            )
+        )
+        result = executor.run(plan)
+
+        assert result.error is None
+        assert len(docker.containers_stopped) == 1
+        assert len(docker.containers_created) == 1
+        # Sandbox operations should not be called
+        assert len(docker.stopped) == 0
+        assert len(docker.created) == 0
+
+    def test_container_creation_failure(self, tmp_path: Path) -> None:
+        """When docker.create_container fails, execution stops at prepare_container."""
+        repo_path = tmp_path / "my-repo"
+        git = MockGitBackend(local_repos={str(repo_path): repo_path})
+        docker = MockDockerBackend(fail_on="create_container")
+        backends = _mock_backends(git=git, docker=docker)
+        ctx = ExecutionContext(backends=backends)
+        handler = RealStepHandler(ctx)
+        executor = Executor(handler=handler)
+
+        plan = Planner().create_plan(
+            PlannerInput(repo=str(repo_path), task="fix bug", target="container")
+        )
+        result = executor.run(plan)
+
+        assert result.state == WorkflowState.FAILED
+        assert result.failed_step == "prepare_container"
+        assert result.completed_steps == ["validate_repo", "create_worktree"]
 
 
 class TestURLRepoIntegration:

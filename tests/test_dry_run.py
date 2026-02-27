@@ -248,6 +248,82 @@ class TestDryRunNoSideEffects:
         assert "gh auth setup-git" in auth.commands[0]
 
 
+class TestDryRunContainerCommands:
+    """Verify dry-run container flow records correct commands."""
+
+    def test_container_flow_completes_without_errors(self) -> None:
+        """Dry-run container flow succeeds end-to-end."""
+        backends = _dryrun_backends()
+        ctx = ExecutionContext(backends=backends)
+        handler = RealStepHandler(ctx)
+        executor = Executor(handler=handler)
+
+        plan = Planner().create_plan(
+            PlannerInput(repo="/tmp/my-repo", task="fix bug", target="container")
+        )
+        result = executor.run(plan)
+
+        assert result.error is None
+        assert result.state == WorkflowState.AGENT_RUNNING
+
+    def test_container_flow_records_docker_run_not_sandbox_create(self) -> None:
+        """Container dry-run records 'docker run' (create_container), not sandbox create."""
+        backends = _dryrun_backends()
+        ctx = ExecutionContext(backends=backends)
+        handler = RealStepHandler(ctx)
+        executor = Executor(handler=handler)
+
+        plan = Planner().create_plan(
+            PlannerInput(repo="/tmp/my-repo", task="fix bug", target="container")
+        )
+        executor.run(plan)
+
+        docker = backends.docker
+        assert isinstance(docker, DryRunDockerBackend)
+        # Should have docker run (create_container) but not sandbox create
+        run_cmds = [c for c in docker.commands if "docker run" in c]
+        sandbox_create_cmds = [c for c in docker.commands if "sandbox create" in c]
+        assert len(run_cmds) >= 1
+        assert len(sandbox_create_cmds) == 0
+
+    def test_container_flow_records_auth_command(self) -> None:
+        """Container dry-run records auth setup command with container name."""
+        backends = _dryrun_backends()
+        ctx = ExecutionContext(backends=backends)
+        handler = RealStepHandler(ctx)
+        executor = Executor(handler=handler)
+
+        plan = Planner().create_plan(
+            PlannerInput(repo="/tmp/my-repo", task="fix bug", target="container")
+        )
+        executor.run(plan)
+
+        auth = backends.auth
+        assert isinstance(auth, DryRunAuthBackend)
+        assert len(auth.commands) == 1
+        assert "claude-my-repo" in auth.commands[0]
+
+    def test_container_force_records_exists_check(self) -> None:
+        """Container with force=True records container_exists check."""
+        backends = _dryrun_backends()
+        ctx = ExecutionContext(backends=backends)
+        handler = RealStepHandler(ctx)
+        executor = Executor(handler=handler)
+
+        plan = Planner().create_plan(
+            PlannerInput(
+                repo="/tmp/my-repo", task="fix bug", target="container", force=True
+            )
+        )
+        executor.run(plan)
+
+        docker = backends.docker
+        assert isinstance(docker, DryRunDockerBackend)
+        # container_exists records a docker ps command
+        ps_cmds = [c for c in docker.commands if "docker ps" in c]
+        assert len(ps_cmds) == 1
+
+
 class TestDryRunCustomSandboxName:
     """Verify dry-run with custom sandbox name records correct commands."""
 
