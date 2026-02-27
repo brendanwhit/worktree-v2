@@ -3,10 +3,14 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
+from superintendent.backends.git import MockGitBackend
 from superintendent.cli.main import (
+    _branch_to_slug,
     app,
+    auto_create_worktree,
     cleanup_all,
     cleanup_by_name,
     list_entries,
@@ -681,3 +685,131 @@ class TestBusinessLogicFunctions:
         removed = cleanup_all(registry, dry_run=True)
         assert "stale" in removed
         assert registry.get("stale") is not None
+
+
+class TestBranchToSlug:
+    """Test the _branch_to_slug helper."""
+
+    def test_simple_branch(self) -> None:
+        assert _branch_to_slug("main") == "main"
+
+    def test_slash_branch(self) -> None:
+        assert _branch_to_slug("feature/my-feature") == "feature-my-feature"
+
+    def test_multiple_slashes(self) -> None:
+        assert _branch_to_slug("user/feature/thing") == "user-feature-thing"
+
+    def test_special_chars(self) -> None:
+        assert _branch_to_slug("fix@bug#123") == "fix-bug-123"
+
+    def test_consecutive_dashes(self) -> None:
+        assert _branch_to_slug("a//b") == "a-b"
+
+
+class TestAutoCreateWorktree:
+    """Test the auto_create_worktree function."""
+
+    def test_creates_worktree_for_existing_branch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        registry = WorktreeRegistry(tmp_path / "registry.json")
+        repo_path = tmp_path / "repo"
+        repo_path.mkdir()
+        (repo_path / ".git").mkdir()
+
+        # Mock the worktrees dir so we don't touch real home
+        worktrees_base = tmp_path / "worktrees"
+        monkeypatch.setattr(
+            "superintendent.cli.main._default_worktrees_dir",
+            lambda: worktrees_base,
+        )
+
+        git = MockGitBackend(
+            local_repos={str(repo_path): repo_path},
+            known_branches={"feature/cool"},
+        )
+        # Mock create_worktree_from_existing to also create the directory
+        original = git.create_worktree_from_existing
+
+        def mock_create(repo: Path, branch: str, target: Path) -> bool:
+            target.mkdir(parents=True, exist_ok=True)
+            return original(repo, branch, target)
+
+        git.create_worktree_from_existing = mock_create
+
+        entry = auto_create_worktree("feature/cool", str(repo_path), registry, git)
+        assert entry is not None
+        assert entry.branch == "feature/cool"
+        assert entry.name == "feature-cool"
+        assert "repo" in entry.worktree_path
+        # Should be registered
+        assert registry.get("feature-cool") is not None
+
+    def test_returns_none_when_branch_missing(self, tmp_path: Path) -> None:
+        registry = WorktreeRegistry(tmp_path / "registry.json")
+        repo_path = tmp_path / "repo"
+        repo_path.mkdir()
+        (repo_path / ".git").mkdir()
+        git = MockGitBackend(
+            local_repos={str(repo_path): repo_path},
+            known_branches=set(),
+        )
+        entry = auto_create_worktree(
+            "nonexistent-branch", str(repo_path), registry, git
+        )
+        assert entry is None
+
+    def test_returns_none_when_repo_not_found(self, tmp_path: Path) -> None:
+        registry = WorktreeRegistry(tmp_path / "registry.json")
+        git = MockGitBackend()
+        entry = auto_create_worktree("feature/x", "/no/such/repo", registry, git)
+        assert entry is None
+
+    def test_returns_none_when_worktree_creation_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        registry = WorktreeRegistry(tmp_path / "registry.json")
+        repo_path = tmp_path / "repo"
+        repo_path.mkdir()
+        (repo_path / ".git").mkdir()
+
+        worktrees_base = tmp_path / "worktrees"
+        monkeypatch.setattr(
+            "superintendent.cli.main._default_worktrees_dir",
+            lambda: worktrees_base,
+        )
+
+        git = MockGitBackend(
+            local_repos={str(repo_path): repo_path},
+            known_branches={"feature/x"},
+            fail_on="create_worktree_from_existing",
+        )
+        entry = auto_create_worktree("feature/x", str(repo_path), registry, git)
+        assert entry is None
+
+    def test_registers_existing_worktree_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If the worktree directory already exists, just register it."""
+        registry = WorktreeRegistry(tmp_path / "registry.json")
+        repo_path = tmp_path / "repo"
+        repo_path.mkdir()
+        (repo_path / ".git").mkdir()
+
+        worktrees_base = tmp_path / "worktrees"
+        wt_dir = worktrees_base / "repo" / "feature-x"
+        wt_dir.mkdir(parents=True)
+        monkeypatch.setattr(
+            "superintendent.cli.main._default_worktrees_dir",
+            lambda: worktrees_base,
+        )
+
+        git = MockGitBackend(
+            local_repos={str(repo_path): repo_path},
+            known_branches={"feature/x"},
+        )
+        entry = auto_create_worktree("feature/x", str(repo_path), registry, git)
+        assert entry is not None
+        assert entry.worktree_path == str(wt_dir)
+        # create_worktree_from_existing should NOT have been called
+        assert len(git.worktrees) == 0

@@ -7,11 +7,13 @@ Subcommands:
     cleanup   — Remove stale entries
 """
 
+import re
 from pathlib import Path
 
 import typer
 
 from superintendent.backends.factory import BackendMode, create_backends
+from superintendent.backends.git import GitBackend, RealGitBackend
 from superintendent.orchestrator.executor import Executor
 from superintendent.orchestrator.models import Mode, Target
 from superintendent.orchestrator.planner import Planner, PlannerInput
@@ -29,6 +31,27 @@ def get_default_registry() -> WorktreeRegistry:
 def list_entries(registry: WorktreeRegistry) -> list[WorktreeEntry]:
     """List all entries from the registry."""
     return registry.list_all()
+
+
+def _branch_to_slug(branch: str) -> str:
+    """Convert a branch name to a filesystem-safe slug."""
+    slug = branch.replace("/", "-")
+    slug = re.sub(r"[^a-zA-Z0-9_\-.]", "-", slug)
+    slug = re.sub(r"-+", "-", slug)
+    return slug.strip("-")
+
+
+def _default_worktrees_dir() -> Path:
+    """Return the default worktrees base directory."""
+    return Path.home() / ".claude-worktrees"
+
+
+def _extract_repo_name(repo: str) -> str:
+    """Extract the repo name from a path or URL."""
+    name = repo.rstrip("/").rsplit("/", 1)[-1]
+    if name.endswith(".git"):
+        name = name[:-4]
+    return name
 
 
 def resume_entry(
@@ -49,6 +72,55 @@ def resume_entry(
         return None
     if not Path(entry.worktree_path).exists():
         return None
+    return entry
+
+
+def auto_create_worktree(
+    branch: str,
+    repo: str,
+    registry: WorktreeRegistry,
+    git_backend: GitBackend,
+) -> WorktreeEntry | None:
+    """Auto-create a worktree for an existing branch.
+
+    If the branch exists in the repo, creates a worktree at the standard
+    location (~/.claude-worktrees/<repo>/<branch-slug>), registers it,
+    and returns the entry. Returns None if the branch doesn't exist or
+    worktree creation fails.
+    """
+    # Resolve repo to a local path
+    repo_path = git_backend.ensure_local(repo)
+    if repo_path is None:
+        return None
+
+    if not git_backend.branch_exists(repo_path, branch):
+        return None
+
+    repo_name = _extract_repo_name(repo)
+    slug = _branch_to_slug(branch)
+    worktree_path = _default_worktrees_dir() / repo_name / slug
+
+    if worktree_path.exists():
+        # Worktree directory already exists — just register it
+        entry = WorktreeEntry(
+            name=slug,
+            repo=repo,
+            branch=branch,
+            worktree_path=str(worktree_path),
+        )
+        registry.add(entry)
+        return entry
+
+    if not git_backend.create_worktree_from_existing(repo_path, branch, worktree_path):
+        return None
+
+    entry = WorktreeEntry(
+        name=slug,
+        repo=repo,
+        branch=branch,
+        worktree_path=str(worktree_path),
+    )
+    registry.add(entry)
     return entry
 
 
@@ -189,6 +261,9 @@ def list_cmd() -> None:
 @app.command()
 def resume(
     name: str = typer.Option(..., help="Name or branch of the entry to resume."),
+    repo: str | None = typer.Option(
+        None, help="Repository path/URL (enables auto-create worktree for branches)."
+    ),
     no_merge: bool = typer.Option(
         False, "--no-merge", help="Skip auto-merging main into stale branches."
     ),
@@ -196,11 +271,24 @@ def resume(
     """Resume an existing entry."""
     registry = get_default_registry()
     entry = resume_entry(name, registry)
+
+    # Auto-create worktree if not found in registry but repo is provided
+    if entry is None and repo is not None:
+        git_backend = RealGitBackend()
+        entry = auto_create_worktree(name, repo, registry, git_backend)
+        if entry is not None:
+            typer.echo(f"Auto-created worktree for branch '{name}'")
+
     if entry is None:
         typer.echo(
             f"Error: no entry found for '{name}' (searched by name and branch)",
             err=True,
         )
+        if repo is not None:
+            typer.echo(
+                f"Branch '{name}' not found in repo '{repo}'",
+                err=True,
+            )
         # List available entries as a hint
         all_entries = registry.list_all()
         if all_entries:
