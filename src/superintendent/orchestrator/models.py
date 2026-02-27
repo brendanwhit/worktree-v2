@@ -7,11 +7,15 @@ from typing import Any
 
 
 class Mode(StrEnum):
+    """Agent interaction mode: interactive (observed) or autonomous (headless)."""
+
     interactive = "interactive"
     autonomous = "autonomous"
 
 
 class Target(StrEnum):
+    """Execution target: sandbox (persistent), container (ephemeral), or local."""
+
     sandbox = "sandbox"
     container = "container"
     local = "local"

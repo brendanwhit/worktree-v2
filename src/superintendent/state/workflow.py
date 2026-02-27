@@ -4,6 +4,8 @@ from enum import Enum, auto
 
 
 class WorkflowState(Enum):
+    """States in the agent provisioning workflow, validated by transition rules."""
+
     INIT = auto()
     ENSURING_REPO = auto()
     CREATING_WORKTREE = auto()

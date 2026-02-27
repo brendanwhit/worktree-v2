@@ -10,11 +10,17 @@ from typing import Protocol, runtime_checkable
 class TerminalBackend(Protocol):
     """Protocol for terminal spawn operations."""
 
-    def spawn(self, cmd: str, workspace: Path) -> bool: ...
+    def spawn(self, cmd: str, workspace: Path) -> bool:
+        """Spawn a process in the given workspace directory."""
+        ...
 
-    def wait(self, timeout: int | None = None) -> int: ...
+    def wait(self, timeout: int | None = None) -> int:
+        """Wait for the spawned process. Returns exit code, or -1 on timeout."""
+        ...
 
-    def is_running(self) -> bool: ...
+    def is_running(self) -> bool:
+        """Check if the spawned process is still running."""
+        ...
 
 
 class RealTerminalBackend:

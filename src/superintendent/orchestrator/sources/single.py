@@ -26,6 +26,7 @@ class SingleTaskSource(TaskSource):
         return f"single-{digest}"
 
     def get_tasks(self) -> list[Task]:
+        """Return the single wrapped task."""
         return [
             Task(
                 task_id=self._task_id,
@@ -37,6 +38,7 @@ class SingleTaskSource(TaskSource):
         ]
 
     def get_ready_tasks(self) -> list[Task]:
+        """A single task is always ready."""
         return self.get_tasks()
 
     def update_status(self, task_id: str, status: TaskStatus) -> None:

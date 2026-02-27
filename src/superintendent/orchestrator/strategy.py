@@ -32,7 +32,7 @@ class TaskInfo:
 
 @dataclass
 class ExecutionDecision:
-    """The result of an execution strategy decision."""
+    """Strategy output: chosen mode, target, parallelism, and task grouping."""
 
     mode: Mode
     target: Target

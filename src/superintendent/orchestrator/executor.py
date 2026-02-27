@@ -16,7 +16,9 @@ from superintendent.state.workflow import (
 class StepHandler(Protocol):
     """Protocol for step execution handlers."""
 
-    def execute(self, step: WorkflowStep) -> "StepResult": ...
+    def execute(self, step: WorkflowStep) -> "StepResult":
+        """Execute a single workflow step and return the result."""
+        ...
 
 
 @dataclass
