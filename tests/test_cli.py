@@ -18,6 +18,7 @@ from superintendent.cli.main import (
     resume_entry,
 )
 from superintendent.state.registry import WorktreeEntry, WorktreeRegistry
+from superintendent.state.token_store import DEFAULT_KEY, TokenStore
 
 runner = CliRunner()
 
@@ -941,3 +942,120 @@ class TestCheckAndMergeStale:
         assert "merged develop successfully" in result
         # Should merge origin/develop, not origin/main
         assert git.merges[0][1] == "origin/develop"
+
+
+class TestTokenSetDefault:
+    """Test the 'token set-default' subcommand."""
+
+    def test_success(self, tmp_path: Path) -> None:
+        store = TokenStore(tmp_path / "tokens.json")
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "brendanwhit\n"
+        mock_result.stderr = ""
+
+        with (
+            patch(
+                "superintendent.cli.main.get_default_token_store", return_value=store
+            ),
+            patch("superintendent.cli.main.subprocess.run", return_value=mock_result),
+        ):
+            result = runner.invoke(
+                app, ["token", "set-default", "--token", "ghp_test123"]
+            )
+            assert result.exit_code == 0
+            assert "brendanwhit" in result.output
+            default = store.get(DEFAULT_KEY)
+            assert default is not None
+            assert default.token == "ghp_test123"
+            assert default.github_user == "brendanwhit"
+
+    def test_invalid_token(self, tmp_path: Path) -> None:
+        store = TokenStore(tmp_path / "tokens.json")
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = ""
+        mock_result.stderr = "401 Unauthorized"
+
+        with (
+            patch(
+                "superintendent.cli.main.get_default_token_store", return_value=store
+            ),
+            patch("superintendent.cli.main.subprocess.run", return_value=mock_result),
+        ):
+            result = runner.invoke(app, ["token", "set-default", "--token", "ghp_bad"])
+            assert result.exit_code == 1
+            assert "validation failed" in result.output
+            assert store.get(DEFAULT_KEY) is None
+
+    def test_gh_not_found(self, tmp_path: Path) -> None:
+        store = TokenStore(tmp_path / "tokens.json")
+
+        with (
+            patch(
+                "superintendent.cli.main.get_default_token_store", return_value=store
+            ),
+            patch(
+                "superintendent.cli.main.subprocess.run",
+                side_effect=FileNotFoundError("gh not found"),
+            ),
+        ):
+            result = runner.invoke(app, ["token", "set-default", "--token", "ghp_test"])
+            assert result.exit_code == 1
+            assert "could not validate" in result.output
+
+
+class TestTokenRemoveDefault:
+    """Test the 'token remove-default' subcommand."""
+
+    def test_success(self, tmp_path: Path) -> None:
+        store = TokenStore(tmp_path / "tokens.json")
+        store.add(DEFAULT_KEY, "ghp_test123", github_user="brendanwhit")
+
+        with patch(
+            "superintendent.cli.main.get_default_token_store", return_value=store
+        ):
+            result = runner.invoke(app, ["token", "remove-default"])
+            assert result.exit_code == 0
+            assert "Default token removed" in result.output
+            assert store.get(DEFAULT_KEY) is None
+
+    def test_none_configured(self, tmp_path: Path) -> None:
+        store = TokenStore(tmp_path / "tokens.json")
+
+        with patch(
+            "superintendent.cli.main.get_default_token_store", return_value=store
+        ):
+            result = runner.invoke(app, ["token", "remove-default"])
+            assert result.exit_code == 1
+            assert "No default token configured" in result.output
+
+
+class TestTokenStatusWithDefault:
+    """Test that 'token status' shows default token info."""
+
+    def test_shows_default_and_repos(self, tmp_path: Path) -> None:
+        store = TokenStore(tmp_path / "tokens.json")
+        store.add(DEFAULT_KEY, "ghp_default_long_token", github_user="brendanwhit")
+        store.add("org/repo", "ghp_repo_long_token", permissions=["repo"])
+
+        with patch(
+            "superintendent.cli.main.get_default_token_store", return_value=store
+        ):
+            result = runner.invoke(app, ["token", "status"])
+            assert result.exit_code == 0
+            assert "Default:" in result.output
+            assert "brendanwhit" in result.output
+            assert "org/repo" in result.output
+
+    def test_shows_only_default(self, tmp_path: Path) -> None:
+        store = TokenStore(tmp_path / "tokens.json")
+        store.add(DEFAULT_KEY, "ghp_default_long_token", github_user="brendanwhit")
+
+        with patch(
+            "superintendent.cli.main.get_default_token_store", return_value=store
+        ):
+            result = runner.invoke(app, ["token", "status"])
+            assert result.exit_code == 0
+            assert "Default:" in result.output
+            assert "No tokens stored" not in result.output

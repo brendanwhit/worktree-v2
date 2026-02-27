@@ -120,6 +120,22 @@ class GitBackend(Protocol):
         """Get the default branch name for the remote (e.g. 'main' or 'master')."""
         ...
 
+    def has_merged_pr(self, repo: Path, branch: str) -> bool:
+        """Check if the branch has a merged PR (via gh CLI)."""
+        ...
+
+    def remote_branch_exists(self, repo: Path, branch: str) -> bool:
+        """Check if the remote tracking branch still exists."""
+        ...
+
+    def has_uncommitted_changes(self, worktree_path: Path) -> bool:
+        """Check if the worktree has uncommitted changes."""
+        ...
+
+    def has_unpushed_commits(self, repo: Path, branch: str) -> bool:
+        """Check if the branch has commits not pushed to the remote."""
+        ...
+
 
 class RealGitBackend:
     """Executes actual git commands via subprocess."""
@@ -305,6 +321,57 @@ class RealGitBackend:
                 return candidate
         return "main"
 
+    def has_merged_pr(self, repo: Path, branch: str) -> bool:
+        result = subprocess.run(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--head",
+                branch,
+                "--state",
+                "merged",
+                "--json",
+                "number",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(repo),
+        )
+        if result.returncode != 0:
+            return False
+        try:
+            import json
+
+            prs = json.loads(result.stdout)
+            return len(prs) > 0
+        except (json.JSONDecodeError, TypeError):
+            return False
+
+    def remote_branch_exists(self, repo: Path, branch: str) -> bool:
+        result = subprocess.run(
+            ["git", "-C", str(repo), "ls-remote", "--heads", "origin", branch],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0 and branch in result.stdout
+
+    def has_uncommitted_changes(self, worktree_path: Path) -> bool:
+        result = subprocess.run(
+            ["git", "-C", str(worktree_path), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0 and len(result.stdout.strip()) > 0
+
+    def has_unpushed_commits(self, repo: Path, branch: str) -> bool:
+        result = subprocess.run(
+            ["git", "-C", str(repo), "log", f"origin/{branch}..{branch}", "--oneline"],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0 and len(result.stdout.strip()) > 0
+
 
 @dataclass
 class MockGitBackend:
@@ -322,6 +389,12 @@ class MockGitBackend:
     known_branches: set[str] = field(default_factory=set)
     branch_ages: dict[str, float] = field(default_factory=dict)
     default_branch: str = "main"
+
+    # Smart cleanup mock state
+    merged_branches: set[str] = field(default_factory=set)
+    remote_branches: set[str] = field(default_factory=set)
+    dirty_worktrees: set[str] = field(default_factory=set)
+    unpushed_branches: set[str] = field(default_factory=set)
 
     def clone(self, url: str, path: Path) -> bool:
         if self.fail_on == "clone":
@@ -386,6 +459,18 @@ class MockGitBackend:
     def get_default_branch(self, repo: Path) -> str:  # noqa: ARG002
         return self.default_branch
 
+    def has_merged_pr(self, repo: Path, branch: str) -> bool:  # noqa: ARG002
+        return branch in self.merged_branches
+
+    def remote_branch_exists(self, repo: Path, branch: str) -> bool:  # noqa: ARG002
+        return branch in self.remote_branches
+
+    def has_uncommitted_changes(self, worktree_path: Path) -> bool:
+        return str(worktree_path) in self.dirty_worktrees
+
+    def has_unpushed_commits(self, repo: Path, branch: str) -> bool:  # noqa: ARG002
+        return branch in self.unpushed_branches
+
 
 class DryRunGitBackend:
     """Prints commands that would be run without executing them."""
@@ -440,3 +525,19 @@ class DryRunGitBackend:
     def get_default_branch(self, repo: Path) -> str:
         self.commands.append(f"git -C {repo} symbolic-ref refs/remotes/origin/HEAD")
         return "main"
+
+    def has_merged_pr(self, repo: Path, branch: str) -> bool:  # noqa: ARG002
+        self.commands.append(f"gh pr list --head {branch} --state merged --json number")
+        return False
+
+    def remote_branch_exists(self, repo: Path, branch: str) -> bool:
+        self.commands.append(f"git -C {repo} ls-remote --heads origin {branch}")
+        return True
+
+    def has_uncommitted_changes(self, worktree_path: Path) -> bool:
+        self.commands.append(f"git -C {worktree_path} status --porcelain")
+        return False
+
+    def has_unpushed_commits(self, repo: Path, branch: str) -> bool:
+        self.commands.append(f"git -C {repo} log origin/{branch}..{branch} --oneline")
+        return False
