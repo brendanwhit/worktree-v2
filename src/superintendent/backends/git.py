@@ -2,6 +2,7 @@
 
 import subprocess
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -76,6 +77,26 @@ class GitBackend(Protocol):
         """Resolve a repo string (path or URL) to a local Path, cloning if needed."""
         ...
 
+    def has_merged_pr(self, repo: Path, branch: str) -> bool:
+        """Check if the branch has a merged PR (via gh CLI)."""
+        ...
+
+    def is_branch_stale(self, repo: Path, branch: str, days: int = 30) -> bool:
+        """Check if the branch has had no commits in the last N days."""
+        ...
+
+    def remote_branch_exists(self, repo: Path, branch: str) -> bool:
+        """Check if the remote tracking branch still exists."""
+        ...
+
+    def has_uncommitted_changes(self, worktree_path: Path) -> bool:
+        """Check if the worktree has uncommitted changes."""
+        ...
+
+    def has_unpushed_commits(self, repo: Path, branch: str) -> bool:
+        """Check if the branch has commits not pushed to the remote."""
+        ...
+
 
 class RealGitBackend:
     """Executes actual git commands via subprocess."""
@@ -134,6 +155,72 @@ class RealGitBackend:
             return path
         return None
 
+    def has_merged_pr(self, repo: Path, branch: str) -> bool:
+        result = subprocess.run(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--head",
+                branch,
+                "--state",
+                "merged",
+                "--json",
+                "number",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(repo),
+        )
+        if result.returncode != 0:
+            return False
+        try:
+            import json
+
+            prs = json.loads(result.stdout)
+            return len(prs) > 0
+        except (json.JSONDecodeError, TypeError):
+            return False
+
+    def is_branch_stale(self, repo: Path, branch: str, days: int = 30) -> bool:
+        result = subprocess.run(
+            ["git", "-C", str(repo), "log", "-1", "--format=%aI", branch],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return False
+        try:
+            last_commit = datetime.fromisoformat(result.stdout.strip())
+            cutoff = datetime.now(UTC) - timedelta(days=days)
+            return last_commit < cutoff
+        except (ValueError, TypeError):
+            return False
+
+    def remote_branch_exists(self, repo: Path, branch: str) -> bool:
+        result = subprocess.run(
+            ["git", "-C", str(repo), "ls-remote", "--heads", "origin", branch],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0 and branch in result.stdout
+
+    def has_uncommitted_changes(self, worktree_path: Path) -> bool:
+        result = subprocess.run(
+            ["git", "-C", str(worktree_path), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0 and len(result.stdout.strip()) > 0
+
+    def has_unpushed_commits(self, repo: Path, branch: str) -> bool:
+        result = subprocess.run(
+            ["git", "-C", str(repo), "log", f"origin/{branch}..{branch}", "--oneline"],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0 and len(result.stdout.strip()) > 0
+
 
 @dataclass
 class MockGitBackend:
@@ -178,6 +265,28 @@ class MockGitBackend:
             return None
         return self.local_repos.get(repo)
 
+    # Smart cleanup mock state
+    merged_branches: set[str] = field(default_factory=set)
+    stale_branches: set[str] = field(default_factory=set)
+    remote_branches: set[str] = field(default_factory=set)
+    dirty_worktrees: set[str] = field(default_factory=set)
+    unpushed_branches: set[str] = field(default_factory=set)
+
+    def has_merged_pr(self, repo: Path, branch: str) -> bool:  # noqa: ARG002
+        return branch in self.merged_branches
+
+    def is_branch_stale(self, repo: Path, branch: str, days: int = 30) -> bool:  # noqa: ARG002
+        return branch in self.stale_branches
+
+    def remote_branch_exists(self, repo: Path, branch: str) -> bool:  # noqa: ARG002
+        return branch in self.remote_branches
+
+    def has_uncommitted_changes(self, worktree_path: Path) -> bool:
+        return str(worktree_path) in self.dirty_worktrees
+
+    def has_unpushed_commits(self, repo: Path, branch: str) -> bool:  # noqa: ARG002
+        return branch in self.unpushed_branches
+
 
 class DryRunGitBackend:
     """Prints commands that would be run without executing them."""
@@ -206,3 +315,23 @@ class DryRunGitBackend:
             return None
         self.commands.append(f"# ensure_local: validate {repo}")
         return Path(repo)
+
+    def has_merged_pr(self, repo: Path, branch: str) -> bool:  # noqa: ARG002
+        self.commands.append(f"gh pr list --head {branch} --state merged --json number")
+        return False
+
+    def is_branch_stale(self, repo: Path, branch: str, days: int = 30) -> bool:  # noqa: ARG002
+        self.commands.append(f"git -C {repo} log -1 --format=%aI {branch}")
+        return False
+
+    def remote_branch_exists(self, repo: Path, branch: str) -> bool:
+        self.commands.append(f"git -C {repo} ls-remote --heads origin {branch}")
+        return True
+
+    def has_uncommitted_changes(self, worktree_path: Path) -> bool:
+        self.commands.append(f"git -C {worktree_path} status --porcelain")
+        return False
+
+    def has_unpushed_commits(self, repo: Path, branch: str) -> bool:
+        self.commands.append(f"git -C {repo} log origin/{branch}..{branch} --oneline")
+        return False
