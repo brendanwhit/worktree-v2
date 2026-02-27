@@ -35,11 +35,16 @@ def resume_entry(
     name: str,
     registry: WorktreeRegistry,
 ) -> WorktreeEntry | None:
-    """Look up an entry and verify it still exists.
+    """Look up an entry by name or branch and verify it still exists.
 
+    Tries name lookup first, then falls back to branch lookup.
     Returns the entry if found and its worktree_path exists, else None.
     """
+    # Try by name first
     entry = registry.get(name)
+    if entry is None:
+        # Fall back to branch lookup
+        entry = registry.get_by_branch(name)
     if entry is None:
         return None
     if not Path(entry.worktree_path).exists():
@@ -183,13 +188,25 @@ def list_cmd() -> None:
 
 @app.command()
 def resume(
-    name: str = typer.Option(..., help="Name of the entry to resume."),
+    name: str = typer.Option(..., help="Name or branch of the entry to resume."),
+    no_merge: bool = typer.Option(
+        False, "--no-merge", help="Skip auto-merging main into stale branches."
+    ),
 ) -> None:
     """Resume an existing entry."""
     registry = get_default_registry()
     entry = resume_entry(name, registry)
     if entry is None:
-        typer.echo(f"Error: entry '{name}' not found or path missing", err=True)
+        typer.echo(
+            f"Error: no entry found for '{name}' (searched by name and branch)",
+            err=True,
+        )
+        # List available entries as a hint
+        all_entries = registry.list_all()
+        if all_entries:
+            typer.echo("Available entries:", err=True)
+            for e in all_entries:
+                typer.echo(f"  {e.name} [{e.branch}]", err=True)
         raise typer.Exit(code=1)
 
     sandbox_info = f" (sandbox: {entry.sandbox_name})" if entry.sandbox_name else ""

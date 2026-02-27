@@ -426,6 +426,48 @@ class TestResumeCommand:
             result = runner.invoke(app, ["resume", "--name", "nonexistent"])
             assert result.exit_code == 1
 
+    def test_resume_by_branch(self, tmp_path: Path) -> None:
+        registry = WorktreeRegistry(tmp_path / "registry.json")
+        wt_path = tmp_path / "worktree"
+        wt_path.mkdir()
+        registry.add(
+            WorktreeEntry(
+                name="my-worktree",
+                repo="/tmp/repo",
+                branch="feature/cool-feature",
+                worktree_path=str(wt_path),
+                sandbox_name="claude-test",
+            )
+        )
+        with patch(
+            "superintendent.cli.main.get_default_registry", return_value=registry
+        ):
+            result = runner.invoke(
+                app, ["resume", "--name", "feature/cool-feature"]
+            )
+            assert result.exit_code == 0
+            assert "Resuming" in result.output
+
+    def test_resume_not_found_shows_available(self, tmp_path: Path) -> None:
+        registry = WorktreeRegistry(tmp_path / "registry.json")
+        wt_path = tmp_path / "worktree"
+        wt_path.mkdir()
+        registry.add(
+            WorktreeEntry(
+                name="existing",
+                repo="/tmp/repo",
+                branch="main",
+                worktree_path=str(wt_path),
+            )
+        )
+        with patch(
+            "superintendent.cli.main.get_default_registry", return_value=registry
+        ):
+            result = runner.invoke(app, ["resume", "--name", "nonexistent"])
+            assert result.exit_code == 1
+            assert "searched by name and branch" in result.output
+            assert "existing" in result.output
+
 
 class TestCleanupCommand:
     """Test the 'cleanup' subcommand."""
@@ -527,6 +569,50 @@ class TestBusinessLogicFunctions:
             )
         )
         assert resume_entry("stale", registry) is None
+
+    def test_resume_entry_by_branch(self, tmp_path: Path) -> None:
+        registry = WorktreeRegistry(tmp_path / "registry.json")
+        wt_path = tmp_path / "worktree"
+        wt_path.mkdir()
+        registry.add(
+            WorktreeEntry(
+                name="my-worktree",
+                repo="/tmp/repo",
+                branch="feature/cool",
+                worktree_path=str(wt_path),
+            )
+        )
+        # Look up by branch name, not entry name
+        entry = resume_entry("feature/cool", registry)
+        assert entry is not None
+        assert entry.name == "my-worktree"
+
+    def test_resume_entry_name_takes_precedence(self, tmp_path: Path) -> None:
+        registry = WorktreeRegistry(tmp_path / "registry.json")
+        wt_path1 = tmp_path / "wt1"
+        wt_path1.mkdir()
+        wt_path2 = tmp_path / "wt2"
+        wt_path2.mkdir()
+        registry.add(
+            WorktreeEntry(
+                name="name-match",
+                repo="/tmp/repo1",
+                branch="some-branch",
+                worktree_path=str(wt_path1),
+            )
+        )
+        registry.add(
+            WorktreeEntry(
+                name="other",
+                repo="/tmp/repo2",
+                branch="name-match",
+                worktree_path=str(wt_path2),
+            )
+        )
+        # "name-match" matches both a name and a branch; name should win
+        entry = resume_entry("name-match", registry)
+        assert entry is not None
+        assert entry.repo == "/tmp/repo1"
 
     def test_cleanup_by_name_found(self, tmp_path: Path) -> None:
         registry = WorktreeRegistry(tmp_path / "registry.json")

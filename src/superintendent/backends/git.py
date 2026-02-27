@@ -52,6 +52,14 @@ def _default_search_paths() -> list[Path]:
     return [Path.cwd(), Path.home()]
 
 
+@dataclass
+class WorktreeInfo:
+    """Information about a git worktree."""
+
+    path: Path
+    branch: str | None
+
+
 @runtime_checkable
 class GitBackend(Protocol):
     """Protocol for git operations."""
@@ -74,6 +82,20 @@ class GitBackend(Protocol):
 
     def ensure_local(self, repo: str | None) -> Path | None:
         """Resolve a repo string (path or URL) to a local Path, cloning if needed."""
+        ...
+
+    def list_worktrees(self, repo: Path) -> list["WorktreeInfo"]:
+        """List all worktrees for a repository."""
+        ...
+
+    def branch_exists(self, repo: Path, branch: str) -> bool:
+        """Check if a branch exists (local or remote)."""
+        ...
+
+    def create_worktree_from_existing(
+        self, repo: Path, branch: str, target: Path
+    ) -> bool:
+        """Create a worktree from an existing branch (no -b flag)."""
         ...
 
 
@@ -134,6 +156,57 @@ class RealGitBackend:
             return path
         return None
 
+    def list_worktrees(self, repo: Path) -> list[WorktreeInfo]:
+        result = subprocess.run(
+            ["git", "-C", str(repo), "worktree", "list", "--porcelain"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return []
+        worktrees: list[WorktreeInfo] = []
+        current_path: Path | None = None
+        current_branch: str | None = None
+        for line in result.stdout.splitlines():
+            if line.startswith("worktree "):
+                if current_path is not None:
+                    worktrees.append(WorktreeInfo(path=current_path, branch=current_branch))
+                current_path = Path(line.split(" ", 1)[1])
+                current_branch = None
+            elif line.startswith("branch "):
+                ref = line.split(" ", 1)[1]
+                current_branch = ref.removeprefix("refs/heads/")
+        if current_path is not None:
+            worktrees.append(WorktreeInfo(path=current_path, branch=current_branch))
+        return worktrees
+
+    def branch_exists(self, repo: Path, branch: str) -> bool:
+        # Check local branches
+        result = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--verify", f"refs/heads/{branch}"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return True
+        # Check remote branches
+        result = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--verify", f"refs/remotes/origin/{branch}"],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0
+
+    def create_worktree_from_existing(
+        self, repo: Path, branch: str, target: Path
+    ) -> bool:
+        result = subprocess.run(
+            ["git", "-C", str(repo), "worktree", "add", str(target), branch],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0
+
 
 @dataclass
 class MockGitBackend:
@@ -146,6 +219,8 @@ class MockGitBackend:
 
     fail_on: str | None = None
     local_repos: dict[str, Path] = field(default_factory=dict)
+    known_worktrees: list["WorktreeInfo"] = field(default_factory=list)
+    known_branches: set[str] = field(default_factory=set)
 
     def clone(self, url: str, path: Path) -> bool:
         if self.fail_on == "clone":
@@ -178,6 +253,24 @@ class MockGitBackend:
             return None
         return self.local_repos.get(repo)
 
+    def list_worktrees(self, repo: Path) -> list["WorktreeInfo"]:
+        if self.fail_on == "list_worktrees":
+            return []
+        return self.known_worktrees
+
+    def branch_exists(self, repo: Path, branch: str) -> bool:
+        if self.fail_on == "branch_exists":
+            return False
+        return branch in self.known_branches
+
+    def create_worktree_from_existing(
+        self, repo: Path, branch: str, target: Path
+    ) -> bool:
+        if self.fail_on == "create_worktree_from_existing":
+            return False
+        self.worktrees.append((repo, branch, target))
+        return True
+
 
 class DryRunGitBackend:
     """Prints commands that would be run without executing them."""
@@ -206,3 +299,17 @@ class DryRunGitBackend:
             return None
         self.commands.append(f"# ensure_local: validate {repo}")
         return Path(repo)
+
+    def list_worktrees(self, repo: Path) -> list[WorktreeInfo]:
+        self.commands.append(f"git -C {repo} worktree list --porcelain")
+        return []
+
+    def branch_exists(self, repo: Path, branch: str) -> bool:
+        self.commands.append(f"git -C {repo} rev-parse --verify refs/heads/{branch}")
+        return True
+
+    def create_worktree_from_existing(
+        self, repo: Path, branch: str, target: Path
+    ) -> bool:
+        self.commands.append(f"git -C {repo} worktree add {target} {branch}")
+        return True
