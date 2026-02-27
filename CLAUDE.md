@@ -131,6 +131,29 @@ uv run ruff format --check src/ tests/     # Format clean (not same as lint!)
 
 **Note:** Integration tests that run `git commit` need `user.name` and `user.email` configured in test setup.
 
+## Autonomous Agent Rules
+
+These rules apply when running as an unsupervised autonomous agent (e.g. Ralph in a Docker sandbox).
+
+**Scope discipline:**
+- Only work on the assigned task. Do not refactor unrelated code or add unrequested features.
+- If you discover adjacent work, create a beads issue (`bd create`) — do not do it yourself.
+
+**Git hygiene:**
+- Commit, push, and create a PR via `gh pr create` before exiting. Work that isn't pushed is lost.
+- Use HTTPS remotes only. SSH is not available in sandboxes.
+- Do not commit `.claude/`, editor configs, or other local artifacts.
+- Do not commit `.beads/` changes — the main repo manages its own beads state.
+
+**Beads in sandboxes:**
+- Use `no-db: true` and `no-daemon: true` in beads config (no Dolt in containers).
+- Do not include `.beads/` files in your PR branch. Task tracking is managed externally.
+
+**PR expectations:**
+- PR title should be concise and describe the change, not the task ID.
+- PR body should summarize what changed and include a test plan.
+- Run the full CI checklist (pytest, ruff check, ruff format) before creating the PR.
+
 ## Key Files
 
 - `src/superintendent/cli/main.py` - Typer CLI with run/list/resume/cleanup commands
