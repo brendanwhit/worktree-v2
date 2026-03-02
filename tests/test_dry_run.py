@@ -60,8 +60,27 @@ class TestDryRunSandboxCommands:
         # First command: ensure_local
         assert "ensure_local" in git.commands[0]
         assert "/tmp/my-repo" in git.commands[0]
-        # Second command: worktree add
-        assert "worktree add" in git.commands[1]
+        # Sandbox target uses clone_for_sandbox (standalone), not worktree add
+        assert "git clone" in git.commands[1]
+
+    def test_sandbox_flow_records_template_build(self) -> None:
+        """Dry-run records docker build command for template."""
+        backends = _dryrun_backends()
+        ctx = ExecutionContext(backends=backends)
+        handler = RealStepHandler(ctx)
+        executor = Executor(handler=handler)
+
+        plan = Planner().create_plan(PlannerInput(repo="/tmp/my-repo", task="fix bug"))
+        executor.run(plan)
+
+        docker = backends.docker
+        assert isinstance(docker, DryRunDockerBackend)
+        # template_exists + build_template
+        inspect_cmds = [c for c in docker.commands if "image inspect" in c]
+        build_cmds = [c for c in docker.commands if "docker build" in c]
+        assert len(inspect_cmds) == 1
+        assert len(build_cmds) == 1
+        assert "supt-sandbox:" in build_cmds[0]
 
     def test_sandbox_flow_records_docker_create(self) -> None:
         """Dry-run records docker sandbox create command."""
@@ -94,6 +113,22 @@ class TestDryRunSandboxCommands:
         assert len(auth.commands) == 1
         assert "gh auth setup-git" in auth.commands[0]
         assert "claude-my-repo" in auth.commands[0]
+
+    def test_sandbox_flow_records_beads_init_commands(self) -> None:
+        """Dry-run records Dolt startup and beads init exec commands."""
+        backends = _dryrun_backends()
+        ctx = ExecutionContext(backends=backends)
+        handler = RealStepHandler(ctx)
+        executor = Executor(handler=handler)
+
+        plan = Planner().create_plan(PlannerInput(repo="/tmp/my-repo", task="fix bug"))
+        executor.run(plan)
+
+        docker = backends.docker
+        assert isinstance(docker, DryRunDockerBackend)
+        exec_cmds = [c for c in docker.commands if "exec" in c]
+        assert any("bd dolt start" in c for c in exec_cmds)
+        assert any("bd init" in c and "--sandbox" in c for c in exec_cmds)
 
     def test_sandbox_flow_records_agent_run(self) -> None:
         """Dry-run records docker sandbox run command for agent."""
@@ -438,8 +473,8 @@ class TestDryRunForceFlag:
 class TestDryRunCommandContent:
     """Verify the content of recorded commands matches expected format."""
 
-    def test_git_worktree_command_format(self) -> None:
-        """Git worktree command includes repo path, branch, and target."""
+    def test_git_clone_for_sandbox_command_format(self) -> None:
+        """Sandbox target uses clone_for_sandbox commands with branch and target."""
         backends = _dryrun_backends()
         ctx = ExecutionContext(backends=backends)
         handler = RealStepHandler(ctx)
@@ -450,6 +485,31 @@ class TestDryRunCommandContent:
                 repo="/tmp/my-repo",
                 task="fix bug",
                 branch="feature-branch",
+            )
+        )
+        executor.run(plan)
+
+        git = backends.git
+        assert isinstance(git, DryRunGitBackend)
+        # Sandbox uses clone_for_sandbox: clone + reset + checkout -b
+        clone_cmds = [c for c in git.commands if "git clone" in c]
+        assert len(clone_cmds) == 1
+        checkout_cmds = [c for c in git.commands if "checkout -b feature-branch" in c]
+        assert len(checkout_cmds) == 1
+
+    def test_git_worktree_command_format_local(self) -> None:
+        """Local target uses regular worktree add command."""
+        backends = _dryrun_backends()
+        ctx = ExecutionContext(backends=backends)
+        handler = RealStepHandler(ctx)
+        executor = Executor(handler=handler)
+
+        plan = Planner().create_plan(
+            PlannerInput(
+                repo="/tmp/my-repo",
+                task="fix bug",
+                branch="feature-branch",
+                target="local",
             )
         )
         executor.run(plan)
@@ -476,7 +536,8 @@ class TestDryRunCommandContent:
         create_cmds = [c for c in docker.commands if "create" in c]
         assert len(create_cmds) >= 1
         assert "claude" in create_cmds[0]
-        assert "/tmp/my-repo" in create_cmds[0]
+        # Workspace is the worktree in ~/.claude-worktrees, not the original repo
+        assert ".claude-worktrees/my-repo" in create_cmds[0]
 
     def test_auth_command_references_sandbox(self) -> None:
         """Auth setup command includes the sandbox name."""
