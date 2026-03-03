@@ -15,7 +15,7 @@ in isolated Docker sandboxes, with proper state management and feedback loops.
 │  Inputs:                                                     │
 │    - repo: Path | URL                                        │
 │    - task: str                                               │
-│    - execution_mode: sandbox | local                         │
+│    - target: sandbox | container | local                      │
 │    - options: branch, context_file, etc.                     │
 │                                                              │
 │  Output: WorkflowPlan                                        │
@@ -34,8 +34,11 @@ in isolated Docker sandboxes, with proper state management and feedback loops.
 │  - Emits events for observability                            │
 │                                                              │
 │  State Machine:                                              │
-│    INIT → CLONING → SANDBOX_READY → AGENT_RUNNING           │
-│         → COMPLETED | FAILED                                 │
+│    INIT → ENSURING_REPO → CREATING_WORKTREE                 │
+│      → PREPARING_TEMPLATE → PREPARING_SANDBOX                │
+│      → AUTHENTICATING → INITIALIZING_STATE                   │
+│      → STARTING_AGENT → AGENT_RUNNING                        │
+│      → COMPLETED | FAILED                                    │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -48,12 +51,14 @@ in isolated Docker sandboxes, with proper state management and feedback loops.
 │  ├─ create_sandbox()    ├─ clone()          ├─ spawn()       │
 │  ├─ start_sandbox()     ├─ create_worktree()├─ wait()        │
 │  ├─ stop_sandbox()      ├─ fetch()          └─ is_running()  │
-│  ├─ exec_in_sandbox()   ├─ checkout()                        │
-│  ├─ sandbox_exists()    └─ ensure_local()   AuthBackend      │
-│  └─ list_sandboxes()                        ├─ setup_git_auth│
-│                                              ├─ inject_token  │
-│  Each backend has:                           ├─ validate_token│
-│    - Real implementation (actual systems)    └─ setup_ssh_key │
+│  ├─ remove_sandbox()    ├─ checkout()                        │
+│  ├─ exec_in_sandbox()   ├─ ensure_local()   AuthBackend      │
+│  ├─ run_agent()         ├─ clone_for_sandbox├─ setup_git_auth│
+│  ├─ build_template()    └─ ...              ├─ inject_token  │
+│  ├─ template_exists()                       ├─ validate_token│
+│  └─ list_sandboxes()                        └─ setup_ssh_key │
+│                                                               │
+│  Each backend has:                                            │
 │    - Mock implementation (for testing)                        │
 │    - DryRun implementation (prints commands)                 │
 └─────────────────────────────────────────────────────────────┘
@@ -97,13 +102,15 @@ class WorkflowPlan:
 ```python
 class WorkflowState(Enum):
     INIT = auto()
-    ENSURING_REPO = auto()      # Clone if URL, validate if path
-    CREATING_WORKTREE = auto()  # git worktree add
-    PREPARING_SANDBOX = auto()  # docker sandbox create/start
-    AUTHENTICATING = auto()     # gh auth in sandbox
-    INITIALIZING_STATE = auto() # .ralph/ setup
-    STARTING_AGENT = auto()     # Terminal spawn
-    AGENT_RUNNING = auto()      # Monitoring (optional)
+    ENSURING_REPO = auto()       # Clone if URL, validate if path
+    CREATING_WORKTREE = auto()   # git worktree add (or clone_for_sandbox)
+    PREPARING_TEMPLATE = auto()  # Build Docker image with Dolt/beads
+    PREPARING_SANDBOX = auto()   # docker sandbox create
+    PREPARING_CONTAINER = auto() # docker run (alternative to sandbox)
+    AUTHENTICATING = auto()      # gh auth in sandbox
+    INITIALIZING_STATE = auto()  # .ralph/ setup + beads/Dolt init
+    STARTING_AGENT = auto()      # Terminal spawn or docker sandbox run
+    AGENT_RUNNING = auto()       # Monitoring (optional)
     COMPLETED = auto()
     FAILED = auto()
 ```
@@ -115,8 +122,12 @@ class DockerBackend(Protocol):
     def sandbox_exists(self, name: str) -> bool: ...
     def create_sandbox(self, name: str, workspace: Path, template: str | None) -> bool: ...
     def start_sandbox(self, name: str) -> bool: ...
+    def stop_sandbox(self, name: str) -> bool: ...
+    def remove_sandbox(self, name: str) -> bool: ...
     def exec_in_sandbox(self, name: str, cmd: str) -> tuple[int, str]: ...
-    def run_agent(self, name: str, prompt: str) -> bool: ...
+    def run_agent(self, name: str, prompt: str, autonomous: bool, cwd: Path | None) -> bool: ...
+    def build_template(self, dockerfile_content: str, tag: str) -> bool: ...
+    def template_exists(self, tag: str) -> bool: ...
 
 class RealDockerBackend(DockerBackend):
     """Actually runs docker commands"""
@@ -202,7 +213,7 @@ def test_planner_creates_correct_steps():
         task="implement feature",
         mode="sandbox"
     )
-    assert len(plan.steps) == 6
+    assert len(plan.steps) == 7  # sandbox: validate, worktree, template, sandbox, auth, init, agent
     assert plan.steps[0].action == "validate_repo"
     assert plan.steps[-1].action == "start_agent"
 

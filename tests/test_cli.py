@@ -720,7 +720,7 @@ class TestAutoCreateWorktree:
         # Mock the worktrees dir so we don't touch real home
         worktrees_base = tmp_path / "worktrees"
         monkeypatch.setattr(
-            "superintendent.cli.main._default_worktrees_dir",
+            "superintendent.cli.main.default_worktrees_dir",
             lambda: worktrees_base,
         )
 
@@ -775,7 +775,7 @@ class TestAutoCreateWorktree:
 
         worktrees_base = tmp_path / "worktrees"
         monkeypatch.setattr(
-            "superintendent.cli.main._default_worktrees_dir",
+            "superintendent.cli.main.default_worktrees_dir",
             lambda: worktrees_base,
         )
 
@@ -800,7 +800,7 @@ class TestAutoCreateWorktree:
         wt_dir = worktrees_base / "repo" / "feature-x"
         wt_dir.mkdir(parents=True)
         monkeypatch.setattr(
-            "superintendent.cli.main._default_worktrees_dir",
+            "superintendent.cli.main.default_worktrees_dir",
             lambda: worktrees_base,
         )
 

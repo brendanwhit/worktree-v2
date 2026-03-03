@@ -17,6 +17,22 @@ def _extract_repo_name(url: str) -> str:
     return name
 
 
+def _ssh_to_https(url: str) -> str:
+    """Convert SSH git URLs to HTTPS. Returns non-SSH URLs unchanged.
+
+    Sandboxes don't have SSH, so all git remotes must use HTTPS.
+    Examples:
+        git@github.com:user/repo.git → https://github.com/user/repo.git
+        https://github.com/user/repo  → https://github.com/user/repo
+    """
+    if url.startswith("git@"):
+        # git@github.com:user/repo.git → https://github.com/user/repo.git
+        without_prefix = url[len("git@") :]
+        host, _, path = without_prefix.partition(":")
+        return f"https://{host}/{path}"
+    return url
+
+
 def _is_git_repo(path: Path) -> bool:
     """Check if a path is a git repository."""
     return path.is_dir() and (path / ".git").exists()
@@ -134,6 +150,10 @@ class GitBackend(Protocol):
 
     def has_unpushed_commits(self, repo: Path, branch: str) -> bool:
         """Check if the branch has commits not pushed to the remote."""
+        ...
+
+    def clone_for_sandbox(self, source: Path, target: Path, branch: str) -> bool:
+        """Clone a repo for sandbox use (standalone, no worktree references)."""
         ...
 
 
@@ -372,6 +392,91 @@ class RealGitBackend:
         )
         return result.returncode == 0 and len(result.stdout.strip()) > 0
 
+    def clone_for_sandbox(self, source: Path, target: Path, branch: str) -> bool:
+        # Get remote URL and convert SSH → HTTPS (sandboxes have no SSH)
+        result = subprocess.run(
+            ["git", "-C", str(source), "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return False
+        remote_url = _ssh_to_https(result.stdout.strip())
+
+        # Get default branch for --branch flag
+        default_branch = self.get_default_branch(source)
+
+        # Shallow clone
+        target.parent.mkdir(parents=True, exist_ok=True)
+        result = subprocess.run(
+            [
+                "git",
+                "clone",
+                "--branch",
+                default_branch,
+                "--single-branch",
+                "--depth",
+                "100",
+                remote_url,
+                str(target),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return False
+
+        # Reset index for macOS/Linux compatibility
+        subprocess.run(
+            ["git", "-C", str(target), "reset"],
+            capture_output=True,
+            text=True,
+        )
+
+        # Check if branch exists on remote (from a previous agent session)
+        ls_remote = subprocess.run(
+            ["git", "-C", str(target), "ls-remote", "--heads", "origin", branch],
+            capture_output=True,
+            text=True,
+        )
+        if ls_remote.returncode == 0 and branch in ls_remote.stdout:
+            # Fetch and checkout existing remote branch, then rebase onto default
+            subprocess.run(
+                ["git", "-C", str(target), "fetch", "origin", branch],
+                capture_output=True,
+                text=True,
+            )
+            result = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(target),
+                    "checkout",
+                    "-b",
+                    branch,
+                    f"origin/{branch}",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                return False
+            # Rebase onto default branch to pick up any upstream changes
+            subprocess.run(
+                ["git", "-C", str(target), "rebase", f"origin/{default_branch}"],
+                capture_output=True,
+                text=True,
+            )
+            return True
+
+        # Create and checkout a new branch
+        result = subprocess.run(
+            ["git", "-C", str(target), "checkout", "-b", branch],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0
+
 
 @dataclass
 class MockGitBackend:
@@ -379,6 +484,7 @@ class MockGitBackend:
 
     cloned: list[tuple[str, Path]] = field(default_factory=list)
     worktrees: list[tuple[Path, str, Path]] = field(default_factory=list)
+    sandbox_clones: list[tuple[Path, Path, str]] = field(default_factory=list)
     fetched: list[Path] = field(default_factory=list)
     checkouts: list[tuple[Path, str]] = field(default_factory=list)
     merges: list[tuple[Path, str]] = field(default_factory=list)
@@ -471,6 +577,12 @@ class MockGitBackend:
     def has_unpushed_commits(self, repo: Path, branch: str) -> bool:  # noqa: ARG002
         return branch in self.unpushed_branches
 
+    def clone_for_sandbox(self, source: Path, target: Path, branch: str) -> bool:
+        if self.fail_on == "clone_for_sandbox":
+            return False
+        self.sandbox_clones.append((source, target, branch))
+        return True
+
 
 class DryRunGitBackend:
     """Prints commands that would be run without executing them."""
@@ -541,3 +653,11 @@ class DryRunGitBackend:
     def has_unpushed_commits(self, repo: Path, branch: str) -> bool:
         self.commands.append(f"git -C {repo} log origin/{branch}..{branch} --oneline")
         return False
+
+    def clone_for_sandbox(self, source: Path, target: Path, branch: str) -> bool:
+        self.commands.append(
+            f"git clone --branch main --single-branch --depth 100 <remote-url-from:{source}> {target}"
+        )
+        self.commands.append(f"git -C {target} reset")
+        self.commands.append(f"git -C {target} checkout -b {branch}")
+        return True

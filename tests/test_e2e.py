@@ -44,8 +44,8 @@ class TestE2EDryRunSandbox:
         assert "steps" in plan_data
         assert "metadata" in plan_data
 
-    def test_dry_run_sandbox_plan_has_six_steps(self) -> None:
-        """Dry-run sandbox plan includes all 6 steps."""
+    def test_dry_run_sandbox_plan_has_seven_steps(self) -> None:
+        """Dry-run sandbox plan includes all 7 steps."""
         result = runner.invoke(
             app,
             [
@@ -65,11 +65,12 @@ class TestE2EDryRunSandbox:
         json_text = "\n".join(lines[1:])
         plan_data = json.loads(json_text)
 
-        assert len(plan_data["steps"]) == 6
+        assert len(plan_data["steps"]) == 7
         actions = [s["action"] for s in plan_data["steps"]]
         assert actions == [
             "validate_repo",
             "create_worktree",
+            "prepare_template",
             "prepare_sandbox",
             "authenticate",
             "initialize_state",
@@ -249,8 +250,8 @@ class TestE2EDryRunLocal:
 class TestE2EDryRunContainer:
     """E2E: CLI dry-run for container target produces correct plan."""
 
-    def test_dry_run_container_plan_has_six_steps(self) -> None:
-        """Container mode produces 6-step structure."""
+    def test_dry_run_container_plan_has_seven_steps(self) -> None:
+        """Container mode produces 7-step structure."""
         result = runner.invoke(
             app,
             [
@@ -270,7 +271,7 @@ class TestE2EDryRunContainer:
         json_text = "\n".join(lines[1:])
         plan_data = json.loads(json_text)
 
-        assert len(plan_data["steps"]) == 6
+        assert len(plan_data["steps"]) == 7
 
     def test_dry_run_container_uses_prepare_container(self) -> None:
         """Container plan uses prepare_container action, not prepare_sandbox."""

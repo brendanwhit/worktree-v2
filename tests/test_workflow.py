@@ -15,6 +15,7 @@ class TestWorkflowState:
             "INIT",
             "ENSURING_REPO",
             "CREATING_WORKTREE",
+            "PREPARING_TEMPLATE",
             "PREPARING_SANDBOX",
             "PREPARING_CONTAINER",
             "AUTHENTICATING",
@@ -28,7 +29,7 @@ class TestWorkflowState:
         assert actual == expected
 
     def test_state_count(self):
-        assert len(WorkflowState) == 11
+        assert len(WorkflowState) == 12
 
 
 class TestTransitions:

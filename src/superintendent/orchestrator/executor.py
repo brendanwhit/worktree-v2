@@ -46,6 +46,7 @@ class ExecutionResult:
 _ACTION_TO_STATE: dict[str, WorkflowState] = {
     "validate_repo": WorkflowState.ENSURING_REPO,
     "create_worktree": WorkflowState.CREATING_WORKTREE,
+    "prepare_template": WorkflowState.PREPARING_TEMPLATE,
     "prepare_sandbox": WorkflowState.PREPARING_SANDBOX,
     "prepare_container": WorkflowState.PREPARING_CONTAINER,
     "authenticate": WorkflowState.AUTHENTICATING,
