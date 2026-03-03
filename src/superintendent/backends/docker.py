@@ -1,9 +1,60 @@
 """DockerBackend protocol and implementations (Real, Mock, DryRun)."""
 
+import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
+
+
+def _escape_for_applescript(s: str) -> str:
+    """Escape a string for use inside AppleScript double-quoted strings."""
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _spawn_terminal(command: str, cwd: Path | None = None) -> bool:
+    """Spawn a new terminal window running the given shell command.
+
+    Auto-detects the terminal from $TERM_PROGRAM. Returns True if the
+    spawn succeeded (the process itself may still be running).
+
+    Args:
+        command: Shell command to run in the new terminal.
+        cwd: Working directory for the spawned terminal. Used by WezTerm
+            for tab-title detection (e.g. worktree branch names).
+    """
+    term = os.environ.get("TERM_PROGRAM", "")
+    escaped_cmd = _escape_for_applescript(command)
+
+    if term == "WezTerm":
+        shell = os.environ.get("SHELL", "/bin/bash")
+        spawn_args = ["wezterm", "cli", "spawn", "--new-window"]
+        if cwd:
+            spawn_args.extend(["--cwd", str(cwd)])
+        spawn_args.extend(["--", shell, "-lic", command])
+        proc = subprocess.Popen(spawn_args)
+        return proc.pid > 0
+    elif term == "iTerm.app":
+        script = f'''
+        tell application "iTerm2"
+            create window with default profile
+            tell current session of current window
+                write text "{escaped_cmd}"
+            end tell
+        end tell
+        '''
+        proc = subprocess.Popen(["osascript", "-e", script])
+        return proc.pid > 0
+    else:
+        # Fallback: Terminal.app
+        script = f'''
+        tell application "Terminal"
+            do script "{escaped_cmd}"
+            activate
+        end tell
+        '''
+        proc = subprocess.Popen(["osascript", "-e", script])
+        return proc.pid > 0
 
 
 @runtime_checkable
@@ -30,16 +81,32 @@ class DockerBackend(Protocol):
         """Stop a running sandbox."""
         ...
 
+    def remove_sandbox(self, name: str) -> bool:
+        """Remove a sandbox (must be stopped first, or handles both)."""
+        ...
+
     def exec_in_sandbox(self, name: str, cmd: str) -> tuple[int, str]:
         """Run a shell command inside a sandbox. Returns (exit_code, output)."""
         ...
 
-    def run_agent(self, name: str, prompt: str) -> bool:
+    def run_agent(
+        self, name: str, prompt: str, autonomous: bool = False, cwd: Path | None = None
+    ) -> bool:
         """Launch a Claude agent inside the sandbox with the given prompt."""
         ...
 
     def list_sandboxes(self) -> list[str]:
         """Return names of all known sandboxes."""
+        ...
+
+    # -- Template operations ---------------------------------------------------
+
+    def build_template(self, dockerfile_content: str, tag: str) -> bool:
+        """Build a Docker template image from Dockerfile content."""
+        ...
+
+    def template_exists(self, tag: str) -> bool:
+        """Check if a template image exists locally."""
         ...
 
     # -- Container operations (docker run) ------------------------------------
@@ -97,6 +164,14 @@ class RealDockerBackend:
         )
         return result.returncode == 0
 
+    def remove_sandbox(self, name: str) -> bool:
+        result = subprocess.run(
+            ["docker", "sandbox", "rm", name],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0
+
     def exec_in_sandbox(self, name: str, cmd: str) -> tuple[int, str]:
         result = subprocess.run(
             ["docker", "sandbox", "exec", name, "sh", "-c", cmd],
@@ -108,14 +183,15 @@ class RealDockerBackend:
             output += result.stderr
         return (result.returncode, output)
 
-    def run_agent(self, name: str, prompt: str) -> bool:
+    def run_agent(
+        self, name: str, prompt: str, autonomous: bool = False, cwd: Path | None = None
+    ) -> bool:
         # Workspace is already set at create time; run just takes the sandbox name
-        result = subprocess.run(
-            ["docker", "sandbox", "run", name, "--", prompt],
-            capture_output=True,
-            text=True,
-        )
-        return result.returncode == 0
+        # Spawn in a new terminal window so the user can monitor separately
+        escaped_prompt = prompt.replace("'", "'\\''")
+        skip = " --dangerously-skip-permissions" if autonomous else ""
+        shell_cmd = f"docker sandbox run '{name}' --{skip} '{escaped_prompt}'"
+        return _spawn_terminal(shell_cmd, cwd=cwd)
 
     def list_sandboxes(self) -> list[str]:
         result = subprocess.run(
@@ -126,6 +202,35 @@ class RealDockerBackend:
         if result.returncode != 0:
             return []
         return [line for line in result.stdout.splitlines() if line.strip()]
+
+    # -- Template operations --------------------------------------------------
+
+    def template_exists(self, tag: str) -> bool:
+        result = subprocess.run(
+            ["docker", "image", "inspect", tag],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0
+
+    def build_template(self, dockerfile_content: str, tag: str) -> bool:
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".dockerfile", delete=False
+        ) as f:
+            f.write(dockerfile_content)
+            dockerfile_path = f.name
+        try:
+            result = subprocess.run(
+                ["docker", "build", "-t", tag, "-f", dockerfile_path, "."],
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+            return result.returncode == 0
+        finally:
+            Path(dockerfile_path).unlink(missing_ok=True)
 
     # -- Container operations -------------------------------------------------
 
@@ -187,9 +292,12 @@ class MockDockerBackend:
     containers_created: list[tuple[str, Path]] = field(default_factory=list)
     started: list[str] = field(default_factory=list)
     stopped: list[str] = field(default_factory=list)
+    removed: list[str] = field(default_factory=list)
     containers_stopped: list[str] = field(default_factory=list)
     executed: list[tuple[str, str]] = field(default_factory=list)
-    agents_run: list[tuple[str, str]] = field(default_factory=list)
+    agents_run: list[tuple[str, str, bool, Path | None]] = field(default_factory=list)
+    templates_built: list[tuple[str, str]] = field(default_factory=list)
+    existing_templates: set[str] = field(default_factory=set)
 
     fail_on: str | None = None
     exec_results: dict[str, tuple[int, str]] = field(default_factory=dict)
@@ -221,20 +329,45 @@ class MockDockerBackend:
         self.sandboxes.pop(name, None)
         return True
 
+    def remove_sandbox(self, name: str) -> bool:
+        if self.fail_on == "remove_sandbox":
+            return False
+        self.removed.append(name)
+        self.sandboxes.pop(name, None)
+        return True
+
     def exec_in_sandbox(self, name: str, cmd: str) -> tuple[int, str]:
         self.executed.append((name, cmd))
         if self.fail_on == "exec_in_sandbox":
             return (1, "mock failure")
         return self.exec_results.get(cmd, (0, ""))
 
-    def run_agent(self, name: str, prompt: str) -> bool:
+    def run_agent(
+        self,
+        name: str,
+        prompt: str,
+        autonomous: bool = False,
+        cwd: Path | None = None,
+    ) -> bool:
         if self.fail_on == "run_agent":
             return False
-        self.agents_run.append((name, prompt))
+        self.agents_run.append((name, prompt, autonomous, cwd))
         return True
 
     def list_sandboxes(self) -> list[str]:
         return list(self.sandboxes.keys())
+
+    # -- Template operations --------------------------------------------------
+
+    def template_exists(self, tag: str) -> bool:
+        return tag in self.existing_templates
+
+    def build_template(self, dockerfile_content: str, tag: str) -> bool:
+        if self.fail_on == "build_template":
+            return False
+        self.templates_built.append((dockerfile_content, tag))
+        self.existing_templates.add(tag)
+        return True
 
     # -- Container operations -------------------------------------------------
 
@@ -284,17 +417,41 @@ class DryRunDockerBackend:
         self.commands.append(f"docker sandbox stop {name}")
         return True
 
+    def remove_sandbox(self, name: str) -> bool:
+        self.commands.append(f"docker sandbox rm {name}")
+        return True
+
     def exec_in_sandbox(self, name: str, cmd: str) -> tuple[int, str]:
         self.commands.append(f"docker sandbox exec {name} sh -c '{cmd}'")
         return (0, "")
 
-    def run_agent(self, name: str, prompt: str) -> bool:
-        self.commands.append(f"docker sandbox run {name} -- '{prompt}'")
+    def run_agent(
+        self,
+        name: str,
+        prompt: str,
+        autonomous: bool = False,
+        cwd: Path | None = None,
+    ) -> bool:
+        skip = " --dangerously-skip-permissions" if autonomous else ""
+        cmd = f"docker sandbox run {name} --{skip} '{prompt}'"
+        if cwd:
+            cmd += f"  # cwd={cwd}"
+        self.commands.append(cmd)
         return True
 
     def list_sandboxes(self) -> list[str]:
         self.commands.append("docker sandbox ls -q")
         return []
+
+    # -- Template operations --------------------------------------------------
+
+    def template_exists(self, tag: str) -> bool:
+        self.commands.append(f"docker image inspect {tag}")
+        return False
+
+    def build_template(self, dockerfile_content: str, tag: str) -> bool:  # noqa: ARG002
+        self.commands.append(f"docker build -t {tag} -f <generated>.dockerfile .")
+        return True
 
     # -- Container operations -------------------------------------------------
 

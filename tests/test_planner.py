@@ -15,12 +15,12 @@ class TestPlannerInput:
 
 
 class TestPlanner:
-    def test_sandbox_mode_creates_six_steps(self):
+    def test_sandbox_mode_creates_seven_steps(self):
         planner = Planner()
         plan = planner.create_plan(
             PlannerInput(repo="/test/repo", task="implement feature")
         )
-        assert len(plan.steps) == 6
+        assert len(plan.steps) == 7
 
     def test_sandbox_mode_step_actions(self):
         planner = Planner()
@@ -31,6 +31,7 @@ class TestPlanner:
         assert actions == [
             "validate_repo",
             "create_worktree",
+            "prepare_template",
             "prepare_sandbox",
             "authenticate",
             "initialize_state",
@@ -47,6 +48,7 @@ class TestPlanner:
         assert ids == [
             "validate_repo",
             "create_worktree",
+            "prepare_template",
             "prepare_sandbox",
             "authenticate",
             "initialize_state",
@@ -73,12 +75,12 @@ class TestPlanner:
             "start_agent",
         ]
 
-    def test_container_target_creates_six_steps(self):
+    def test_container_target_creates_seven_steps(self):
         planner = Planner()
         plan = planner.create_plan(
             PlannerInput(repo="/test/repo", task="test", target="container")
         )
-        assert len(plan.steps) == 6
+        assert len(plan.steps) == 7
 
     def test_container_target_uses_prepare_container(self):
         planner = Planner()
@@ -89,6 +91,7 @@ class TestPlanner:
         assert actions == [
             "validate_repo",
             "create_worktree",
+            "prepare_template",
             "prepare_container",
             "authenticate",
             "initialize_state",
@@ -111,6 +114,38 @@ class TestPlanner:
         )
         auth_step = plan.get_step("authenticate")
         assert auth_step.depends_on == ["prepare_container"]
+
+    def test_sandbox_prepare_depends_on_prepare_template(self):
+        planner = Planner()
+        plan = planner.create_plan(
+            PlannerInput(repo="/test/repo", task="test", target="sandbox")
+        )
+        sandbox_step = plan.get_step("prepare_sandbox")
+        assert sandbox_step.depends_on == ["prepare_template"]
+
+    def test_container_prepare_depends_on_prepare_template(self):
+        planner = Planner()
+        plan = planner.create_plan(
+            PlannerInput(repo="/test/repo", task="test", target="container")
+        )
+        container_step = plan.get_step("prepare_container")
+        assert container_step.depends_on == ["prepare_template"]
+
+    def test_prepare_template_depends_on_create_worktree(self):
+        planner = Planner()
+        plan = planner.create_plan(
+            PlannerInput(repo="/test/repo", task="test", target="sandbox")
+        )
+        template_step = plan.get_step("prepare_template")
+        assert template_step.depends_on == ["create_worktree"]
+
+    def test_local_mode_has_no_prepare_template(self):
+        planner = Planner()
+        plan = planner.create_plan(
+            PlannerInput(repo="/test/repo", task="test", target="local")
+        )
+        actions = [s.action for s in plan.steps]
+        assert "prepare_template" not in actions
 
     def test_container_steps_use_container_name_param(self):
         planner = Planner()
@@ -155,6 +190,30 @@ class TestPlanner:
         actions = [s.action for s in plan.steps]
         assert "prepare_sandbox" in actions
         assert "prepare_container" not in actions
+
+    def test_sandbox_worktree_step_has_standalone_true(self):
+        planner = Planner()
+        plan = planner.create_plan(
+            PlannerInput(repo="/test/repo", task="test", target="sandbox")
+        )
+        wt_step = plan.get_step("create_worktree")
+        assert wt_step.params.get("standalone") is True
+
+    def test_container_worktree_step_has_standalone_true(self):
+        planner = Planner()
+        plan = planner.create_plan(
+            PlannerInput(repo="/test/repo", task="test", target="container")
+        )
+        wt_step = plan.get_step("create_worktree")
+        assert wt_step.params.get("standalone") is True
+
+    def test_local_worktree_step_has_no_standalone(self):
+        planner = Planner()
+        plan = planner.create_plan(
+            PlannerInput(repo="/test/repo", task="test", target="local")
+        )
+        wt_step = plan.get_step("create_worktree")
+        assert "standalone" not in wt_step.params
 
     def test_metadata_includes_target(self):
         planner = Planner()

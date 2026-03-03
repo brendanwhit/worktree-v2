@@ -13,6 +13,7 @@ from superintendent.backends.git import (
     _extract_repo_name,
     _find_local_clone,
     _is_git_repo,
+    _ssh_to_https,
 )
 
 
@@ -191,6 +192,23 @@ class TestMockGitBackend:
         backend = MockGitBackend()
         assert backend.get_default_branch(Path("/repo")) == "main"
 
+    def test_clone_for_sandbox_records_call(self):
+        backend = MockGitBackend()
+        result = backend.clone_for_sandbox(Path("/repo"), Path("/target"), "agent/test")
+        assert result is True
+        assert len(backend.sandbox_clones) == 1
+        assert backend.sandbox_clones[0] == (
+            Path("/repo"),
+            Path("/target"),
+            "agent/test",
+        )
+
+    def test_clone_for_sandbox_failure(self):
+        backend = MockGitBackend(fail_on="clone_for_sandbox")
+        result = backend.clone_for_sandbox(Path("/repo"), Path("/target"), "agent/test")
+        assert result is False
+        assert len(backend.sandbox_clones) == 0
+
 
 class TestDryRunGitBackend:
     """Test DryRunGitBackend command recording."""
@@ -291,6 +309,15 @@ class TestDryRunGitBackend:
         result = backend.get_default_branch(Path("/repo"))
         assert result == "main"
         assert "symbolic-ref" in backend.commands[0]
+
+    def test_clone_for_sandbox_records_commands(self):
+        backend = DryRunGitBackend()
+        result = backend.clone_for_sandbox(Path("/repo"), Path("/target"), "agent/test")
+        assert result is True
+        assert len(backend.commands) == 3
+        assert "git clone" in backend.commands[0]
+        assert "reset" in backend.commands[1]
+        assert "checkout -b agent/test" in backend.commands[2]
 
 
 class TestRealGitBackend:
@@ -691,3 +718,32 @@ class TestHelperFunctions:
         repo2.mkdir()
         (repo2 / ".git").mkdir()
         assert _find_local_clone("target", [first, second]) == repo1
+
+
+class TestSshToHttps:
+    """Test SSH → HTTPS URL conversion."""
+
+    def test_converts_github_ssh(self):
+        assert (
+            _ssh_to_https("git@github.com:user/repo.git")
+            == "https://github.com/user/repo.git"
+        )
+
+    def test_converts_github_ssh_no_suffix(self):
+        assert (
+            _ssh_to_https("git@github.com:user/repo") == "https://github.com/user/repo"
+        )
+
+    def test_converts_gitlab_ssh(self):
+        assert (
+            _ssh_to_https("git@gitlab.com:org/project.git")
+            == "https://gitlab.com/org/project.git"
+        )
+
+    def test_leaves_https_unchanged(self):
+        url = "https://github.com/user/repo.git"
+        assert _ssh_to_https(url) == url
+
+    def test_leaves_http_unchanged(self):
+        url = "http://github.com/user/repo"
+        assert _ssh_to_https(url) == url

@@ -22,7 +22,11 @@ from superintendent.orchestrator.executor import Executor
 from superintendent.orchestrator.models import Mode, Target, Verbosity
 from superintendent.orchestrator.planner import Planner, PlannerInput
 from superintendent.orchestrator.repo_info import RepoInfo
-from superintendent.orchestrator.step_handler import ExecutionContext, RealStepHandler
+from superintendent.orchestrator.step_handler import (
+    ExecutionContext,
+    RealStepHandler,
+    default_worktrees_dir,
+)
 from superintendent.orchestrator.strategy import ExecutionStrategy, TaskInfo
 from superintendent.state.registry import WorktreeEntry, WorktreeRegistry
 from superintendent.state.token_store import DEFAULT_KEY, TokenStore
@@ -48,11 +52,6 @@ def _branch_to_slug(branch: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9_\-.]", "-", slug)
     slug = re.sub(r"-+", "-", slug)
     return slug.strip("-")
-
-
-def _default_worktrees_dir() -> Path:
-    """Return the default worktrees base directory."""
-    return Path.home() / ".claude-worktrees"
 
 
 def _extract_repo_name(repo: str) -> str:
@@ -107,7 +106,7 @@ def auto_create_worktree(
 
     repo_name = _extract_repo_name(repo)
     slug = _branch_to_slug(branch)
-    worktree_path = _default_worktrees_dir() / repo_name / slug
+    worktree_path = default_worktrees_dir() / repo_name / slug
 
     if worktree_path.exists():
         # Worktree directory already exists — just register it
@@ -450,6 +449,15 @@ def run(
         if result.failed_step:
             typer.echo(f"Failed at step: {result.failed_step}", err=True)
         raise typer.Exit(code=1)
+
+    if verbosity != Verbosity.quiet:
+        typer.echo(f"Agent spawned for {plan.metadata.get('repo_name', repo)}.")
+        env = plan.metadata.get("sandbox_name") or plan.metadata.get("container_name")
+        if env:
+            typer.echo(f"  Environment: {env}")
+        wt = context.step_outputs.get("create_worktree", {}).get("worktree_path")
+        if wt:
+            typer.echo(f"  Worktree: {wt}")
 
 
 @app.command(name="list")

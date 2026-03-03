@@ -1,6 +1,7 @@
 """Tests for AuthBackend (Protocol, Mock, DryRun, Real)."""
 
 from pathlib import Path
+from unittest.mock import patch
 
 from superintendent.backends.auth import (
     AuthBackend,
@@ -164,17 +165,39 @@ class TestRealAuthBackend:
         result = backend.setup_git_auth("my-sandbox")
         assert result is False
 
-    def test_inject_token_calls_exec(self):
+    @patch("superintendent.backends.auth.subprocess.run")
+    def test_inject_token_pipes_to_gh_auth(self, mock_subprocess):
+        """inject_token pipes token to gh auth login, then runs gh auth setup-git."""
+        mock_subprocess.return_value.returncode = 0
         docker = MockDockerBackend()
         backend = RealAuthBackend(docker=docker)
         result = backend.inject_token("my-sandbox", "ghp_abc123")
         assert result is True
+        # Step 1: subprocess.run called with pipe command
+        mock_subprocess.assert_called_once()
+        pipe_cmd = mock_subprocess.call_args[0][0]
+        assert "gh auth login --with-token" in pipe_cmd
+        assert "my-sandbox" in pipe_cmd
+        # Step 2: docker exec for gh auth setup-git + git config
         assert len(docker.executed) == 1
-        assert docker.executed[0][0] == "my-sandbox"
-        assert "GH_TOKEN" in docker.executed[0][1]
-        assert "ghp_abc123" in docker.executed[0][1]
+        assert "gh auth setup-git" in docker.executed[0][1]
+        assert "git config" in docker.executed[0][1]
 
-    def test_inject_token_failure(self):
+    @patch("superintendent.backends.auth.subprocess.run")
+    def test_inject_token_auth_login_failure(self, mock_subprocess):
+        """inject_token returns False if gh auth login fails."""
+        mock_subprocess.return_value.returncode = 1
+        docker = MockDockerBackend()
+        backend = RealAuthBackend(docker=docker)
+        result = backend.inject_token("my-sandbox", "ghp_abc123")
+        assert result is False
+        # Should not proceed to setup-git step
+        assert len(docker.executed) == 0
+
+    @patch("superintendent.backends.auth.subprocess.run")
+    def test_inject_token_setup_git_failure(self, mock_subprocess):
+        """inject_token returns False if gh auth setup-git fails."""
+        mock_subprocess.return_value.returncode = 0
         docker = MockDockerBackend(fail_on="exec_in_sandbox")
         backend = RealAuthBackend(docker=docker)
         result = backend.inject_token("my-sandbox", "ghp_abc123")

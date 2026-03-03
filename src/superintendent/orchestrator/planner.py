@@ -76,7 +76,22 @@ class Planner:
             )
         )
 
-        # Step 2: Create worktree
+        if inputs.target == "container":
+            self._build_container_steps(steps, inputs, metadata)
+        elif inputs.target == "sandbox":
+            self._build_sandbox_steps(steps, inputs, metadata)
+        else:
+            self._build_local_steps(steps, inputs, metadata)
+
+        return steps
+
+    def _build_local_steps(
+        self,
+        steps: list[WorkflowStep],
+        inputs: "PlannerInput",
+        metadata: dict[str, Any],
+    ) -> None:
+        # Step 2: Create worktree (regular, not standalone)
         steps.append(
             WorkflowStep(
                 id="create_worktree",
@@ -89,38 +104,31 @@ class Planner:
             )
         )
 
-        if inputs.target == "container":
-            self._build_container_steps(steps, inputs, metadata)
-        elif inputs.target == "sandbox":
-            self._build_sandbox_steps(steps, inputs, metadata)
-        else:
-            # Local mode: no sandbox, no auth
-            # Step 3: Initialize state
-            steps.append(
-                WorkflowStep(
-                    id="initialize_state",
-                    action="initialize_state",
-                    params={
-                        "task": inputs.task,
-                        "context_file": inputs.context_file,
-                    },
-                    depends_on=["create_worktree"],
-                )
+        # Step 3: Initialize state
+        steps.append(
+            WorkflowStep(
+                id="initialize_state",
+                action="initialize_state",
+                params={
+                    "task": inputs.task,
+                    "context_file": inputs.context_file,
+                },
+                depends_on=["create_worktree"],
             )
+        )
 
-            # Step 4: Start agent locally
-            steps.append(
-                WorkflowStep(
-                    id="start_agent",
-                    action="start_agent",
-                    params={
-                        "task": inputs.task,
-                    },
-                    depends_on=["initialize_state"],
-                )
+        # Step 4: Start agent locally
+        steps.append(
+            WorkflowStep(
+                id="start_agent",
+                action="start_agent",
+                params={
+                    "task": inputs.task,
+                    "mode": inputs.mode,
+                },
+                depends_on=["initialize_state"],
             )
-
-        return steps
+        )
 
     def _build_sandbox_steps(
         self,
@@ -130,6 +138,30 @@ class Planner:
     ) -> None:
         sandbox_name = metadata["sandbox_name"]
 
+        # Step 2: Create worktree (standalone clone for sandbox isolation)
+        steps.append(
+            WorkflowStep(
+                id="create_worktree",
+                action="create_worktree",
+                params={
+                    "branch": metadata["branch"],
+                    "repo_name": metadata["repo_name"],
+                    "standalone": True,
+                },
+                depends_on=["validate_repo"],
+            )
+        )
+
+        # Step 3: Build custom template image with beads CLI
+        steps.append(
+            WorkflowStep(
+                id="prepare_template",
+                action="prepare_template",
+                params={},
+                depends_on=["create_worktree"],
+            )
+        )
+
         steps.append(
             WorkflowStep(
                 id="prepare_sandbox",
@@ -138,7 +170,7 @@ class Planner:
                     "sandbox_name": sandbox_name,
                     "force": inputs.force,
                 },
-                depends_on=["create_worktree"],
+                depends_on=["prepare_template"],
             )
         )
         steps.append(
@@ -167,6 +199,7 @@ class Planner:
                 params={
                     "sandbox_name": sandbox_name,
                     "task": inputs.task,
+                    "mode": inputs.mode,
                 },
                 depends_on=["initialize_state"],
             )
@@ -180,6 +213,30 @@ class Planner:
     ) -> None:
         container_name = metadata["container_name"]
 
+        # Step 2: Create worktree (standalone clone for container isolation)
+        steps.append(
+            WorkflowStep(
+                id="create_worktree",
+                action="create_worktree",
+                params={
+                    "branch": metadata["branch"],
+                    "repo_name": metadata["repo_name"],
+                    "standalone": True,
+                },
+                depends_on=["validate_repo"],
+            )
+        )
+
+        # Step 3: Build custom template image with beads CLI
+        steps.append(
+            WorkflowStep(
+                id="prepare_template",
+                action="prepare_template",
+                params={},
+                depends_on=["create_worktree"],
+            )
+        )
+
         steps.append(
             WorkflowStep(
                 id="prepare_container",
@@ -188,7 +245,7 @@ class Planner:
                     "container_name": container_name,
                     "force": inputs.force,
                 },
-                depends_on=["create_worktree"],
+                depends_on=["prepare_template"],
             )
         )
         steps.append(
@@ -217,6 +274,7 @@ class Planner:
                 params={
                     "container_name": container_name,
                     "task": inputs.task,
+                    "mode": inputs.mode,
                 },
                 depends_on=["initialize_state"],
             )

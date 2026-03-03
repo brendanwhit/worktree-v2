@@ -1,5 +1,6 @@
 """AuthBackend protocol and implementations (Real, Mock, DryRun)."""
 
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -39,9 +40,24 @@ class RealAuthBackend:
         return exit_code == 0
 
     def inject_token(self, sandbox_name: str, token: str) -> bool:
+        # Step 1: Pipe token to gh auth login --with-token
+        # Must use subprocess directly because we need stdin piping (-i flag)
+        escaped_token = token.replace("'", "'\\''")
+        auth_result = subprocess.run(
+            f"echo '{escaped_token}' | docker sandbox exec -i '{sandbox_name}' gh auth login --with-token",
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
+        if auth_result.returncode != 0:
+            return False
+
+        # Step 2: Configure git credential helper and identity
         exit_code, _ = self._docker.exec_in_sandbox(
             sandbox_name,
-            f"export GH_TOKEN={token} && gh auth setup-git",
+            "gh auth setup-git && "
+            'git config --global user.email "noreply@anthropic.com" && '
+            'git config --global user.name "Claude (Ralph Agent)"',
         )
         return exit_code == 0
 

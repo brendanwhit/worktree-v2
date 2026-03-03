@@ -55,7 +55,8 @@ git push                   # Land the plane!
 bd create "New issue" --deps discovered-from:<current-task>
 ```
 
-**Docker sandbox agents:** Use `no-db: true` and `no-daemon: true` in config.yaml.
+**Docker sandbox agents:** Beads runs with a Dolt SQL server inside each sandbox (started automatically).
+Agents should use `--sandbox --json` flags with `bd` commands.
 Sandboxes have no SSH — use HTTPS git remotes and `gh` CLI only.
 Agents should commit, push, and create PRs via `gh pr create` before exiting.
 See `docs/BEADS_BEST_PRACTICES.md` for complete guide.
@@ -146,7 +147,8 @@ These rules apply when running as an unsupervised autonomous agent (e.g. Ralph i
 - Do not commit `.beads/` changes — the main repo manages its own beads state.
 
 **Beads in sandboxes:**
-- Use `no-db: true` and `no-daemon: true` in beads config (no Dolt in containers).
+- Dolt SQL server runs inside each sandbox (superintendent starts it automatically).
+- Use `--sandbox --json` flags with `bd` commands for structured output and disabled auto-sync.
 - Do not include `.beads/` files in your PR branch. Task tracking is managed externally.
 
 **PR expectations:**

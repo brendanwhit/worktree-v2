@@ -13,7 +13,7 @@ bd close <id> "Summary"       # Complete with summary
 bd doctor                     # Check for issues
 
 # Project setup
-bd init --branch beads-sync   # Enable daemon + worktree support
+bd init                       # Initialize beads (starts Dolt server)
 bd setup claude               # Install Claude Code hooks
 
 # Maintenance
@@ -35,11 +35,16 @@ This prevents merge conflicts and enables parallel agent work.
 ### 2. Dependencies Are First-Class
 
 ```bash
-# Types of dependencies
+# Managing dependencies (use `bd dep`, not `bd update --blocked-by`)
+bd dep add <issue> <depends-on>           # Issue depends on depends-on
 bd dep add <child> blocks:<parent>        # Child blocks parent
 bd dep add <child> related:<other>        # Associated but independent
 bd dep add <child> parent:<epic>          # Hierarchical nesting
 bd dep add <child> discovered-from:<task> # Found while working on task
+
+# Viewing dependencies
+bd show <id>                              # See blocks/blocked-by
+bd blocked                                # Show all blocked issues
 ```
 
 Always define dependencies before starting work. `bd ready` only shows unblocked tasks.
@@ -78,6 +83,10 @@ Every session must end properly:
 1. Update task status: `bd update <id> --status blocked --reason "needs X"`
 2. Create handoff summary in task notes
 3. `git push` - the plane isn't landed until push succeeds
+
+> **Note:** `bd sync` is deprecated. Use `bd dolt push` / `bd dolt pull` instead.
+> `bd dolt push` requires a configured Dolt remote — in sandboxes without one,
+> beads state is local-only, and that's fine since the host manages task tracking.
 
 The handoff should contain:
 - What was accomplished
@@ -126,64 +135,66 @@ bd compact          # Summarize old closed issues (run monthly)
 
 ## Git Worktree Integration
 
-Beads shares one database across all worktrees:
+Beads v0.50+ uses a Dolt SQL server shared across all worktrees:
 
 ```bash
-# Recommended: use sync branch for multi-worktree development
-bd init --branch beads-sync
-
-# This enables:
-# - Daemon auto-syncs to beads-sync branch
-# - Safe concurrent access via SQLite locking
-# - No per-worktree database copies
+# Dolt server runs on port 3307; beads auto-detects it
+bd dolt start          # Start server (if not already running)
+bd dolt push           # Push beads state to Dolt remote
+bd dolt pull           # Pull beads state from Dolt remote
 ```
 
 ## Docker Sandbox Configuration
 
-The beads database (Dolt) is not available inside Docker sandboxes. For agents
-running in Docker sandboxes, configure beads to use JSONL-only mode:
+Superintendent automatically sets up beads with a Dolt SQL server inside each
+sandbox during the `initialize_state` workflow step. The setup:
 
-```yaml
-# .beads/config.yaml
-no-db: true           # Use JSONL backend instead of SQLite
-no-daemon: true       # Avoid 5-second daemon startup timeout
-issue-prefix: <repo>  # Required for no-db mode
-```
+1. **Dolt binary** is baked into the sandbox template image (multi-stage build)
+2. **Dolt server** is started inside the sandbox via `bd dolt start`
+3. **Beads is initialized** with `bd init --sandbox --skip-hooks -p {name} --database {name} -q`
+   (repo name is sanitized: dots → underscores, non-alphanumeric stripped)
+4. Beads auto-detects the running Dolt server on port 3307
+5. **Automatic retry**: If init fails (e.g. Dolt fsync error on overlay fs),
+   superintendent cleans up and retries once after a 2-second delay
 
-### Additional Setup for Sandbox Agents
+### Agent Conventions
 
-1. **Clear assume-unchanged flag** so JSONL changes can be committed:
-   ```bash
-   git update-index --no-assume-unchanged .beads/issues.jsonl
-   ```
+Agents inside sandboxes should use these flags with all `bd` commands:
 
-2. **Install beads in the sandbox template** (not at runtime):
-   ```dockerfile
-   RUN npm install -g @beads/bd
-   ```
-
-3. **Pre-commit hooks still work** - they use `bd sync --flush-only` which
-   succeeds in no-db mode since there's nothing to flush.
+- `--sandbox` — disables auto-sync (sandbox-safe)
+- `--json` — structured JSON output for reliable parsing
 
 ### Sandbox Network Limitations
 
 Docker sandboxes have restricted network access:
 
-- **No SSH**: `git@github.com:...` URLs will fail. Use HTTPS URLs or `gh` CLI
+- **No SSH**: Superintendent automatically converts SSH remote URLs
+  (`git@github.com:...`) to HTTPS when cloning for sandboxes
 - **HTTPS + gh CLI only**: All git operations must use HTTPS remotes
-- **No SQLite daemon**: The beads daemon cannot run; use JSONL-only mode
 - **Agents should commit and push**: Configure agents to `git push` and
   create PRs via `gh pr create` before finishing, since the sandbox is
   ephemeral
 
-### Why These Settings?
+### Branch Divergence Handling
+
+When a previous agent session has already pushed to the same branch,
+superintendent handles this automatically during `clone_for_sandbox`:
+
+1. Checks if the branch exists on the remote
+2. If so, checks out the existing branch instead of creating a new one
+3. Rebases onto the default branch to pick up upstream changes
+
+This prevents "branch diverged" errors when agents resume work on existing branches.
+
+### Troubleshooting
 
 | Issue | Symptom | Fix |
 |-------|---------|-----|
-| No DB in sandbox | Dolt not available in Docker sandbox | `no-db: true` |
-| Daemon timeout | 5-second delay on every command | `no-daemon: true` |
-| JSONL not committed | `git add` silently ignores file | Clear assume-unchanged |
-| no-db mode fails | "mixed prefixes" error | Set `issue-prefix` |
+| Dolt not starting | `bd` commands fail with connection error | Check `dolt` binary is in template image |
+| Dolt fsync error | Init fails on first try, succeeds on retry | Normal in containers; superintendent retries automatically |
+| Health check timeout | `initialize_state` step fails | Dolt may need more startup time; check container resources |
+| Init fails | `bd init` returns non-zero | Verify `--sandbox` flag and repo name prefix |
+| Invalid DB name | Dots in repo name cause Dolt errors | Superintendent sanitizes names automatically (dots → underscores) |
 
 ## Claude Code Integration
 

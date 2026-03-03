@@ -102,7 +102,7 @@ class TestMockDockerBackend:
         backend = MockDockerBackend()
         result = backend.run_agent("test", "do stuff")
         assert result is True
-        assert backend.agents_run == [("test", "do stuff")]
+        assert backend.agents_run == [("test", "do stuff", False, None)]
 
     def test_run_agent_failure(self):
         backend = MockDockerBackend(fail_on="run_agent")
@@ -176,6 +176,30 @@ class TestMockDockerBackend:
         backend.create_container("shared-name", Path("/w2"))
         assert backend.container_exists("shared-name") is True
 
+    # -- Template operations --------------------------------------------------
+
+    def test_template_exists_when_added(self):
+        backend = MockDockerBackend(existing_templates={"my-tag"})
+        assert backend.template_exists("my-tag") is True
+
+    def test_template_not_exists(self):
+        backend = MockDockerBackend()
+        assert backend.template_exists("nonexistent") is False
+
+    def test_build_template_records_call(self):
+        backend = MockDockerBackend()
+        result = backend.build_template("FROM ubuntu", "my-tag")
+        assert result is True
+        assert len(backend.templates_built) == 1
+        assert backend.templates_built[0] == ("FROM ubuntu", "my-tag")
+        assert backend.template_exists("my-tag") is True
+
+    def test_build_template_failure(self):
+        backend = MockDockerBackend(fail_on="build_template")
+        result = backend.build_template("FROM ubuntu", "my-tag")
+        assert result is False
+        assert len(backend.templates_built) == 0
+
 
 class TestDryRunDockerBackend:
     """Test DryRunDockerBackend command recording."""
@@ -243,6 +267,22 @@ class TestDryRunDockerBackend:
         backend.stop_sandbox("test")
         backend.list_sandboxes()
         assert len(backend.commands) == 7
+
+    # -- Template operations --------------------------------------------------
+
+    def test_template_exists_records_command(self):
+        backend = DryRunDockerBackend()
+        result = backend.template_exists("my-tag")
+        assert result is False
+        assert len(backend.commands) == 1
+        assert "docker image inspect my-tag" in backend.commands[0]
+
+    def test_build_template_records_command(self):
+        backend = DryRunDockerBackend()
+        result = backend.build_template("FROM ubuntu", "my-tag")
+        assert result is True
+        assert len(backend.commands) == 1
+        assert "docker build -t my-tag" in backend.commands[0]
 
     # -- Container operations -------------------------------------------------
 
