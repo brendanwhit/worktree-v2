@@ -421,10 +421,31 @@ class RealStepHandler:
 
     # -- Terminal handler (start_agent) ---------------------------------------
 
+    @staticmethod
+    def _notify_plugin_installed() -> bool:
+        """Check if the notify plugin is installed globally."""
+        plugin_dir = (
+            Path.home() / ".claude" / "plugins" / "cache" / "fdy-skills" / "notify"
+        )
+        return plugin_dir.exists()
+
+    def _enrich_prompt(self, task: str, autonomous: bool) -> str:
+        """Add session-setup instructions to the agent prompt."""
+        preamble_parts: list[str] = []
+        if not autonomous and self._notify_plugin_installed():
+            preamble_parts.append(
+                "First, run /notify:notify to enable audio notifications."
+            )
+        if not preamble_parts:
+            return task
+        preamble = " ".join(preamble_parts)
+        return f"{preamble}\n\n{task}"
+
     def _handle_start_agent(self, step: WorkflowStep) -> StepResult:
         env_name = step.params.get("sandbox_name") or step.params.get("container_name")
         task = step.params.get("task", "")
         autonomous = step.params.get("mode") == "autonomous"
+        task = self._enrich_prompt(task, autonomous)
 
         wt_output = self._context.step_outputs.get("create_worktree")
         worktree_path = Path(wt_output["worktree_path"]) if wt_output else Path.cwd()
