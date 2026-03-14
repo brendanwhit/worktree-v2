@@ -12,11 +12,13 @@ def _escape_for_applescript(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def _spawn_terminal(command: str, cwd: Path | None = None) -> bool:
+def _spawn_terminal(
+    command: str, cwd: Path | None = None
+) -> subprocess.Popen[bytes] | None:
     """Spawn a new terminal window running the given shell command.
 
-    Auto-detects the terminal from $TERM_PROGRAM. Returns True if the
-    spawn succeeded (the process itself may still be running).
+    Auto-detects the terminal from $TERM_PROGRAM. Returns the spawner
+    process on success, or None on failure.
 
     Args:
         command: Shell command to run in the new terminal.
@@ -32,8 +34,7 @@ def _spawn_terminal(command: str, cwd: Path | None = None) -> bool:
         if cwd:
             spawn_args.extend(["--cwd", str(cwd)])
         spawn_args.extend(["--", shell, "-lic", command])
-        proc = subprocess.Popen(spawn_args)
-        return proc.pid > 0
+        return subprocess.Popen(spawn_args)
     elif term == "iTerm.app":
         script = f'''
         tell application "iTerm2"
@@ -43,8 +44,7 @@ def _spawn_terminal(command: str, cwd: Path | None = None) -> bool:
             end tell
         end tell
         '''
-        proc = subprocess.Popen(["osascript", "-e", script])
-        return proc.pid > 0
+        return subprocess.Popen(["osascript", "-e", script])
     else:
         # Fallback: Terminal.app
         script = f'''
@@ -53,8 +53,7 @@ def _spawn_terminal(command: str, cwd: Path | None = None) -> bool:
             activate
         end tell
         '''
-        proc = subprocess.Popen(["osascript", "-e", script])
-        return proc.pid > 0
+        return subprocess.Popen(["osascript", "-e", script])
 
 
 @runtime_checkable
@@ -191,7 +190,7 @@ class RealDockerBackend:
         escaped_prompt = prompt.replace("'", "'\\''")
         skip = " --dangerously-skip-permissions" if autonomous else ""
         shell_cmd = f"docker sandbox run '{name}' --{skip} '{escaped_prompt}'"
-        return _spawn_terminal(shell_cmd, cwd=cwd)
+        return _spawn_terminal(shell_cmd, cwd=cwd) is not None
 
     def list_sandboxes(self) -> list[str]:
         result = subprocess.run(
