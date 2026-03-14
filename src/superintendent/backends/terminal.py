@@ -1,9 +1,10 @@
 """TerminalBackend protocol and implementations (Real, Mock, DryRun)."""
 
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
+
+from superintendent.backends.docker import _spawn_terminal
 
 
 @runtime_checkable
@@ -24,38 +25,18 @@ class TerminalBackend(Protocol):
 
 
 class RealTerminalBackend:
-    """Spawns processes in a real terminal."""
-
-    def __init__(self) -> None:
-        self._process: subprocess.Popen[str] | None = None
+    """Spawns a visible terminal window for interactive agent sessions."""
 
     def spawn(self, cmd: str, workspace: Path) -> bool:
-        try:
-            self._process = subprocess.Popen(
-                cmd,
-                shell=True,
-                cwd=str(workspace),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            return True
-        except OSError:
-            return False
+        return _spawn_terminal(cmd, cwd=workspace)
 
-    def wait(self, timeout: int | None = None) -> int:
-        if self._process is None:
-            return -1
-        try:
-            self._process.wait(timeout=timeout)
-            return self._process.returncode
-        except subprocess.TimeoutExpired:
-            return -1
+    def wait(self, timeout: int | None = None) -> int:  # noqa: ARG002
+        # Terminal windows are managed by the OS; nothing to wait on.
+        return 0
 
     def is_running(self) -> bool:
-        if self._process is None:
-            return False
-        return self._process.poll() is None
+        # Cannot track OS-managed terminal windows.
+        return False
 
 
 @dataclass

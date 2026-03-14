@@ -926,14 +926,10 @@ class TestStartAgentHandler:
         assert len(docker.agents_run) == 1
         assert docker.agents_run[0][0] == "claude-test"
 
-    def test_spawns_locally(self, tmp_path, monkeypatch):
-        """When no sandbox_name, uses _spawn_terminal to open a real terminal."""
-        spawned_cmds: list[str] = []
-        monkeypatch.setattr(
-            "superintendent.orchestrator.step_handler._spawn_terminal",
-            lambda cmd, cwd=None: spawned_cmds.append(cmd) or True,  # noqa: ARG005
-        )
-        ctx = ExecutionContext(backends=_mock_backends())
+    def test_spawns_locally(self, tmp_path):
+        """When no sandbox_name, uses terminal.spawn."""
+        terminal = MockTerminalBackend()
+        ctx = ExecutionContext(backends=_mock_backends(terminal=terminal))
         ctx.step_outputs["create_worktree"] = {"worktree_path": str(tmp_path)}
         handler = RealStepHandler(ctx)
 
@@ -946,8 +942,9 @@ class TestStartAgentHandler:
         result = handler.execute(step)
 
         assert result.success is True
-        assert len(spawned_cmds) == 1
-        assert "claude '" in spawned_cmds[0]
+        assert len(terminal.spawned) == 1
+        cmd, _ = terminal.spawned[0]
+        assert "claude '" in cmd
 
     def test_sandbox_agent_failure(self, tmp_path):
         """When docker.run_agent fails, return failure."""
@@ -966,13 +963,10 @@ class TestStartAgentHandler:
 
         assert result.success is False
 
-    def test_local_spawn_failure(self, tmp_path, monkeypatch):
-        """When _spawn_terminal fails, return failure."""
-        monkeypatch.setattr(
-            "superintendent.orchestrator.step_handler._spawn_terminal",
-            lambda cmd, cwd=None: False,  # noqa: ARG005
-        )
-        ctx = ExecutionContext(backends=_mock_backends())
+    def test_local_spawn_failure(self, tmp_path):
+        """When terminal.spawn fails, return failure."""
+        terminal = MockTerminalBackend(fail_on="spawn")
+        ctx = ExecutionContext(backends=_mock_backends(terminal=terminal))
         ctx.step_outputs["create_worktree"] = {"worktree_path": str(tmp_path)}
         handler = RealStepHandler(ctx)
 

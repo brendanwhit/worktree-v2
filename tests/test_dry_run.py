@@ -197,13 +197,8 @@ class TestDryRunLocalCommands:
         assert isinstance(auth, DryRunAuthBackend)
         assert len(auth.commands) == 0
 
-    def test_local_flow_records_terminal_spawn(self, monkeypatch) -> None:
-        """Local dry-run spawns a real terminal window via _spawn_terminal."""
-        spawned_cmds: list[str] = []
-        monkeypatch.setattr(
-            "superintendent.orchestrator.step_handler._spawn_terminal",
-            lambda cmd, cwd=None: spawned_cmds.append(cmd) or True,  # noqa: ARG005
-        )
+    def test_local_flow_records_terminal_spawn(self) -> None:
+        """Local dry-run records terminal spawn command."""
         backends = _dryrun_backends()
         ctx = ExecutionContext(backends=backends)
         handler = RealStepHandler(ctx)
@@ -214,8 +209,10 @@ class TestDryRunLocalCommands:
         )
         executor.run(plan)
 
-        assert len(spawned_cmds) >= 1
-        assert "fix bug" in spawned_cmds[0]
+        terminal = backends.terminal
+        assert isinstance(terminal, DryRunTerminalBackend)
+        assert len(terminal.commands) >= 1
+        assert "fix bug" in terminal.commands[0]
 
 
 class TestDryRunNoSideEffects:

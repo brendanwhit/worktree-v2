@@ -256,18 +256,12 @@ class TestLocalFlowIntegration:
         assert len(docker.created) == 0
         assert len(auth.git_auths) == 0
 
-    def test_local_plan_spawns_terminal_agent(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
-        """A local plan spawns the agent via _spawn_terminal."""
-        spawned_cmds: list[str] = []
-        monkeypatch.setattr(
-            "superintendent.orchestrator.step_handler._spawn_terminal",
-            lambda cmd, cwd=None: spawned_cmds.append(cmd) or True,  # noqa: ARG005
-        )
+    def test_local_plan_spawns_terminal_agent(self, tmp_path: Path) -> None:
+        """A local plan spawns the agent via terminal.spawn."""
         repo_path = tmp_path / "my-repo"
         git = MockGitBackend(local_repos={str(repo_path): repo_path})
-        backends = _mock_backends(git=git)
+        terminal = MockTerminalBackend()
+        backends = _mock_backends(git=git, terminal=terminal)
         ctx = ExecutionContext(backends=backends)
         handler = RealStepHandler(ctx)
         executor = Executor(handler=handler)
@@ -277,8 +271,9 @@ class TestLocalFlowIntegration:
         )
         executor.run(plan)
 
-        assert len(spawned_cmds) == 1
-        assert "fix bug" in spawned_cmds[0]
+        assert len(terminal.spawned) == 1
+        cmd, _ = terminal.spawned[0]
+        assert "fix bug" in cmd
 
 
 class TestContainerFlowIntegration:
@@ -757,15 +752,12 @@ class TestFailurePropagationIntegration:
         assert result.failed_step == "start_agent"
         assert len(result.completed_steps) == 6
 
-    def test_local_terminal_failure(self, tmp_path: Path, monkeypatch) -> None:
-        """When _spawn_terminal fails in local mode, execution stops at start_agent."""
-        monkeypatch.setattr(
-            "superintendent.orchestrator.step_handler._spawn_terminal",
-            lambda cmd, cwd=None: False,  # noqa: ARG005
-        )
+    def test_local_terminal_failure(self, tmp_path: Path) -> None:
+        """When terminal.spawn fails in local mode, execution stops at start_agent."""
         repo_path = tmp_path / "my-repo"
         git = MockGitBackend(local_repos={str(repo_path): repo_path})
-        backends = _mock_backends(git=git)
+        terminal = MockTerminalBackend(fail_on="spawn")
+        backends = _mock_backends(git=git, terminal=terminal)
         ctx = ExecutionContext(backends=backends)
         handler = RealStepHandler(ctx)
         executor = Executor(handler=handler)

@@ -10,7 +10,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from superintendent.backends.docker import _spawn_terminal
 from superintendent.backends.factory import Backends
 from superintendent.orchestrator.executor import StepResult
 from superintendent.orchestrator.models import Verbosity, WorkflowStep
@@ -462,9 +461,10 @@ class RealStepHandler:
                     message=f"Failed to start agent in {env_name}",
                 )
         else:
+            terminal = self._context.backends.terminal
             escaped_task = task.replace("'", "'\\''")
-            cmd = f"cd '{worktree_path}' && unset CLAUDECODE && claude '{escaped_task}'"
-            if not _spawn_terminal(cmd, cwd=worktree_path):
+            cmd = f"unset CLAUDECODE && claude '{escaped_task}'"
+            if not terminal.spawn(cmd, worktree_path):
                 return StepResult(
                     success=False,
                     step_id=step.id,

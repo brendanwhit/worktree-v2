@@ -122,39 +122,33 @@ class TestDryRunTerminalBackend:
 
 
 class TestRealTerminalBackend:
-    """Test RealTerminalBackend with actual processes."""
+    """Test RealTerminalBackend delegates to _spawn_terminal."""
 
-    def test_spawn_and_wait(self, tmp_path):
+    def test_spawn_calls_spawn_terminal(self, tmp_path, monkeypatch):
+        spawned: list[tuple[str, Path | None]] = []
+        monkeypatch.setattr(
+            "superintendent.backends.terminal._spawn_terminal",
+            lambda cmd, cwd=None: spawned.append((cmd, cwd)) or True,
+        )
         backend = RealTerminalBackend()
         result = backend.spawn("echo hello", tmp_path)
         assert result is True
-        assert backend.is_running() is True
-        code = backend.wait()
-        assert code == 0
+        assert len(spawned) == 1
+        assert spawned[0] == ("echo hello", tmp_path)
+
+    def test_spawn_returns_false_on_failure(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "superintendent.backends.terminal._spawn_terminal",
+            lambda cmd, cwd=None: False,  # noqa: ARG005
+        )
+        backend = RealTerminalBackend()
+        result = backend.spawn("echo hello", tmp_path)
+        assert result is False
+
+    def test_wait_returns_zero(self):
+        backend = RealTerminalBackend()
+        assert backend.wait() == 0
+
+    def test_is_running_returns_false(self):
+        backend = RealTerminalBackend()
         assert backend.is_running() is False
-
-    def test_spawn_failing_command(self, tmp_path):
-        backend = RealTerminalBackend()
-        result = backend.spawn("exit 1", tmp_path)
-        assert result is True
-        code = backend.wait()
-        assert code == 1
-
-    def test_is_running_before_spawn(self):
-        backend = RealTerminalBackend()
-        assert backend.is_running() is False
-
-    def test_wait_before_spawn(self):
-        backend = RealTerminalBackend()
-        code = backend.wait()
-        assert code == -1
-
-    def test_spawn_with_timeout(self, tmp_path):
-        backend = RealTerminalBackend()
-        backend.spawn("sleep 10", tmp_path)
-        code = backend.wait(timeout=0)
-        assert code == -1
-        assert backend.is_running() is True
-        # Clean up
-        backend._process.kill()  # type: ignore[union-attr]
-        backend._process.wait()  # type: ignore[union-attr]
