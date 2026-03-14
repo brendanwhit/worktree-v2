@@ -24,8 +24,8 @@ from superintendent.backends.git import (
 from superintendent.backends.terminal import (
     DryRunTerminalBackend,
     MockTerminalBackend,
-    RealTerminalBackend,
     TerminalBackend,
+    detect_terminal,
 )
 
 
@@ -54,7 +54,7 @@ def create_backends(mode: BackendMode) -> Backends:
         return Backends(
             docker=docker,
             git=RealGitBackend(),
-            terminal=RealTerminalBackend(),
+            terminal=detect_terminal(),
             auth=RealAuthBackend(docker=docker),
         )
     elif mode == BackendMode.MOCK:

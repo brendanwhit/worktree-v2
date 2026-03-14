@@ -15,7 +15,7 @@ from superintendent.backends.git import DryRunGitBackend, MockGitBackend, RealGi
 from superintendent.backends.terminal import (
     DryRunTerminalBackend,
     MockTerminalBackend,
-    RealTerminalBackend,
+    _BaseRealTerminalBackend,
 )
 
 
@@ -38,7 +38,7 @@ class TestCreateBackends:
         backends = create_backends(BackendMode.REAL)
         assert isinstance(backends.docker, RealDockerBackend)
         assert isinstance(backends.git, RealGitBackend)
-        assert isinstance(backends.terminal, RealTerminalBackend)
+        assert isinstance(backends.terminal, _BaseRealTerminalBackend)
         assert isinstance(backends.auth, RealAuthBackend)
 
     def test_mock_mode_creates_mock_backends(self):

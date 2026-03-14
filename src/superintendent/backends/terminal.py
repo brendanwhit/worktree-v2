@@ -1,11 +1,20 @@
-"""TerminalBackend protocol and implementations (Real, Mock, DryRun)."""
+"""TerminalBackend protocol and implementations.
 
+Real backends: WezTermBackend, ITermBackend, TerminalAppBackend
+Testing backends: MockTerminalBackend, DryRunTerminalBackend
+Factory: detect_terminal() picks the right backend from $TERM_PROGRAM.
+"""
+
+import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from superintendent.backends.docker import _spawn_terminal
+
+def _escape_for_applescript(s: str) -> str:
+    """Escape a string for use inside AppleScript double-quoted strings."""
+    return s.replace("\\", "\\\\").replace('"', '\\"')
 
 
 @runtime_checkable
@@ -25,14 +34,18 @@ class TerminalBackend(Protocol):
         ...
 
 
-class RealTerminalBackend:
-    """Spawns a visible terminal window for interactive agent sessions."""
+class _BaseRealTerminalBackend:
+    """Shared process-tracking logic for real terminal backends."""
 
     def __init__(self) -> None:
         self._process: subprocess.Popen[bytes] | None = None
 
+    def _launch(self, cmd: str, workspace: Path) -> subprocess.Popen[bytes] | None:
+        """Subclasses implement this to spawn in their specific terminal."""
+        raise NotImplementedError
+
     def spawn(self, cmd: str, workspace: Path) -> bool:
-        self._process = _spawn_terminal(cmd, cwd=workspace)
+        self._process = self._launch(cmd, workspace)
         return self._process is not None
 
     def wait(self, timeout: int | None = None) -> int:
@@ -48,6 +61,57 @@ class RealTerminalBackend:
         if self._process is None:
             return False
         return self._process.poll() is None
+
+
+class WezTermBackend(_BaseRealTerminalBackend):
+    """Spawns a new WezTerm window."""
+
+    def _launch(self, cmd: str, workspace: Path) -> subprocess.Popen[bytes] | None:
+        shell = os.environ.get("SHELL", "/bin/bash")
+        spawn_args = ["wezterm", "cli", "spawn", "--new-window"]
+        spawn_args.extend(["--cwd", str(workspace)])
+        spawn_args.extend(["--", shell, "-lic", cmd])
+        return subprocess.Popen(spawn_args)
+
+
+class ITermBackend(_BaseRealTerminalBackend):
+    """Spawns a new iTerm2 window via AppleScript."""
+
+    def _launch(self, cmd: str, workspace: Path) -> subprocess.Popen[bytes] | None:  # noqa: ARG002
+        escaped = _escape_for_applescript(cmd)
+        script = f'''
+        tell application "iTerm2"
+            create window with default profile
+            tell current session of current window
+                write text "{escaped}"
+            end tell
+        end tell
+        '''
+        return subprocess.Popen(["osascript", "-e", script])
+
+
+class TerminalAppBackend(_BaseRealTerminalBackend):
+    """Spawns a new Terminal.app window via AppleScript (macOS fallback)."""
+
+    def _launch(self, cmd: str, workspace: Path) -> subprocess.Popen[bytes] | None:  # noqa: ARG002
+        escaped = _escape_for_applescript(cmd)
+        script = f'''
+        tell application "Terminal"
+            do script "{escaped}"
+            activate
+        end tell
+        '''
+        return subprocess.Popen(["osascript", "-e", script])
+
+
+def detect_terminal() -> _BaseRealTerminalBackend:
+    """Pick the right terminal backend based on $TERM_PROGRAM."""
+    term = os.environ.get("TERM_PROGRAM", "")
+    if term == "WezTerm":
+        return WezTermBackend()
+    elif term == "iTerm.app":
+        return ITermBackend()
+    return TerminalAppBackend()
 
 
 @dataclass
