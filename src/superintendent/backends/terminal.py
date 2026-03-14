@@ -7,6 +7,7 @@ Factory: detect_terminal() picks the right backend from $TERM_PROGRAM.
 
 import os
 import subprocess
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -34,15 +35,15 @@ class TerminalBackend(Protocol):
         ...
 
 
-class _BaseRealTerminalBackend:
-    """Shared process-tracking logic for real terminal backends."""
+class RealTerminalBackend(ABC):
+    """Abstract base for real terminal backends with shared process-tracking."""
 
     def __init__(self) -> None:
         self._process: subprocess.Popen[bytes] | None = None
 
+    @abstractmethod
     def _launch(self, cmd: str, workspace: Path) -> subprocess.Popen[bytes] | None:
         """Subclasses implement this to spawn in their specific terminal."""
-        raise NotImplementedError
 
     def spawn(self, cmd: str, workspace: Path) -> bool:
         self._process = self._launch(cmd, workspace)
@@ -63,7 +64,7 @@ class _BaseRealTerminalBackend:
         return self._process.poll() is None
 
 
-class WezTermBackend(_BaseRealTerminalBackend):
+class WezTermBackend(RealTerminalBackend):
     """Spawns a new WezTerm window."""
 
     def _launch(self, cmd: str, workspace: Path) -> subprocess.Popen[bytes] | None:
@@ -74,7 +75,7 @@ class WezTermBackend(_BaseRealTerminalBackend):
         return subprocess.Popen(spawn_args)
 
 
-class ITermBackend(_BaseRealTerminalBackend):
+class ITermBackend(RealTerminalBackend):
     """Spawns a new iTerm2 window via AppleScript."""
 
     def _launch(self, cmd: str, workspace: Path) -> subprocess.Popen[bytes] | None:  # noqa: ARG002
@@ -90,7 +91,7 @@ class ITermBackend(_BaseRealTerminalBackend):
         return subprocess.Popen(["osascript", "-e", script])
 
 
-class TerminalAppBackend(_BaseRealTerminalBackend):
+class TerminalAppBackend(RealTerminalBackend):
     """Spawns a new Terminal.app window via AppleScript (macOS fallback)."""
 
     def _launch(self, cmd: str, workspace: Path) -> subprocess.Popen[bytes] | None:  # noqa: ARG002
@@ -104,7 +105,7 @@ class TerminalAppBackend(_BaseRealTerminalBackend):
         return subprocess.Popen(["osascript", "-e", script])
 
 
-def detect_terminal() -> _BaseRealTerminalBackend:
+def detect_terminal() -> RealTerminalBackend:
     """Pick the right terminal backend based on $TERM_PROGRAM."""
     term = os.environ.get("TERM_PROGRAM", "")
     if term == "WezTerm":
