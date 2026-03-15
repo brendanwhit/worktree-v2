@@ -943,6 +943,8 @@ class TestStartAgentHandler:
 
         assert result.success is True
         assert len(terminal.spawned) == 1
+        cmd, _ = terminal.spawned[0]
+        assert "claude '" in cmd
 
     def test_sandbox_agent_failure(self, tmp_path):
         """When docker.run_agent fails, return failure."""

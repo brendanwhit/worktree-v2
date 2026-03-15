@@ -1,60 +1,11 @@
 """DockerBackend protocol and implementations (Real, Mock, DryRun)."""
 
-import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-
-def _escape_for_applescript(s: str) -> str:
-    """Escape a string for use inside AppleScript double-quoted strings."""
-    return s.replace("\\", "\\\\").replace('"', '\\"')
-
-
-def _spawn_terminal(command: str, cwd: Path | None = None) -> bool:
-    """Spawn a new terminal window running the given shell command.
-
-    Auto-detects the terminal from $TERM_PROGRAM. Returns True if the
-    spawn succeeded (the process itself may still be running).
-
-    Args:
-        command: Shell command to run in the new terminal.
-        cwd: Working directory for the spawned terminal. Used by WezTerm
-            for tab-title detection (e.g. worktree branch names).
-    """
-    term = os.environ.get("TERM_PROGRAM", "")
-    escaped_cmd = _escape_for_applescript(command)
-
-    if term == "WezTerm":
-        shell = os.environ.get("SHELL", "/bin/bash")
-        spawn_args = ["wezterm", "cli", "spawn", "--new-window"]
-        if cwd:
-            spawn_args.extend(["--cwd", str(cwd)])
-        spawn_args.extend(["--", shell, "-lic", command])
-        proc = subprocess.Popen(spawn_args)
-        return proc.pid > 0
-    elif term == "iTerm.app":
-        script = f'''
-        tell application "iTerm2"
-            create window with default profile
-            tell current session of current window
-                write text "{escaped_cmd}"
-            end tell
-        end tell
-        '''
-        proc = subprocess.Popen(["osascript", "-e", script])
-        return proc.pid > 0
-    else:
-        # Fallback: Terminal.app
-        script = f'''
-        tell application "Terminal"
-            do script "{escaped_cmd}"
-            activate
-        end tell
-        '''
-        proc = subprocess.Popen(["osascript", "-e", script])
-        return proc.pid > 0
+from superintendent.backends.terminal import detect_terminal
 
 
 @runtime_checkable
@@ -191,7 +142,8 @@ class RealDockerBackend:
         escaped_prompt = prompt.replace("'", "'\\''")
         skip = " --dangerously-skip-permissions" if autonomous else ""
         shell_cmd = f"docker sandbox run '{name}' --{skip} '{escaped_prompt}'"
-        return _spawn_terminal(shell_cmd, cwd=cwd)
+        terminal = detect_terminal()
+        return terminal.spawn(shell_cmd, cwd or Path.cwd())
 
     def list_sandboxes(self) -> list[str]:
         result = subprocess.run(

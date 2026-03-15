@@ -462,7 +462,8 @@ class RealStepHandler:
                 )
         else:
             terminal = self._context.backends.terminal
-            cmd = f"claude --prompt '{task}'"
+            escaped_task = task.replace("'", "'\\''")
+            cmd = f"unset CLAUDECODE && claude '{escaped_task}'"
             if not terminal.spawn(cmd, worktree_path):
                 return StepResult(
                     success=False,
