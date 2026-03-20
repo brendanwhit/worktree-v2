@@ -125,6 +125,7 @@ class Planner:
                 params={
                     "task": inputs.task,
                     "mode": inputs.mode,
+                    "context_file": inputs.context_file,
                 },
                 depends_on=["initialize_state"],
             )
@@ -210,6 +211,7 @@ class Planner:
                     "sandbox_name": sandbox_name,
                     "task": inputs.task,
                     "mode": inputs.mode,
+                    "context_file": inputs.context_file,
                 },
                 depends_on=["initialize_state"],
             )
@@ -295,6 +297,7 @@ class Planner:
                     "container_name": container_name,
                     "task": inputs.task,
                     "mode": inputs.mode,
+                    "context_file": inputs.context_file,
                 },
                 depends_on=["initialize_state"],
             )

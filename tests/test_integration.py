@@ -218,7 +218,43 @@ class TestSandboxFlowIntegration:
         assert len(docker.agents_run) == 1
         agent_sandbox, agent_prompt, _, _ = docker.agents_run[0]
         assert agent_sandbox.startswith("claude-")
-        assert agent_prompt == "fix bug"
+        assert "fix bug" in agent_prompt
+        assert "do NOT exit" in agent_prompt
+
+    def test_context_file_injected_into_agent_prompt(self, tmp_path: Path) -> None:
+        """The context file content is injected into the agent prompt."""
+        repo_path = tmp_path / "my-repo"
+        context_file = tmp_path / "plan.md"
+        context_file.write_text("# Plan\n\nStep 1: Do the thing\n")
+
+        git = MockGitBackend(local_repos={str(repo_path): repo_path})
+        docker = MockDockerBackend()
+        backends = _mock_backends(git=git, docker=docker)
+        ctx = ExecutionContext(
+            backends=backends, token_store=_test_token_store(tmp_path)
+        )
+        handler = RealStepHandler(ctx)
+        executor = Executor(handler=handler)
+
+        plan = Planner().create_plan(
+            PlannerInput(
+                repo=str(repo_path),
+                task="do the thing",
+                context_file=str(context_file),
+            )
+        )
+        executor.run(plan)
+
+        assert len(docker.agents_run) == 1
+        _, agent_prompt, _, _ = docker.agents_run[0]
+        assert "do the thing" in agent_prompt
+        assert "Step 1: Do the thing" in agent_prompt
+
+        # Context file should also be copied to .ralph/
+        wt_path = Path(ctx.step_outputs["create_worktree"]["worktree_path"])
+        ralph_context = wt_path / ".ralph" / "context.md"
+        assert ralph_context.exists()
+        assert "Step 1: Do the thing" in ralph_context.read_text()
 
     def test_sandbox_custom_sandbox_name(self, tmp_path: Path) -> None:
         """A custom sandbox_name is passed through to docker operations."""

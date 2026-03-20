@@ -401,6 +401,20 @@ class RealStepHandler:
         ralph_state = RalphState(ralph_dir)
         ralph_state.init(task=task)
 
+        # Copy context file into .ralph/ so it survives reconnection
+        context_file = step.params.get("context_file")
+        if context_file:
+            src = Path(context_file).expanduser()
+            if src.is_file():
+                dest = ralph_dir / "context.md"
+                dest.write_text(src.read_text())
+            else:
+                return StepResult(
+                    success=False,
+                    step_id=step.id,
+                    message=f"Context file not found: {context_file}",
+                )
+
         # Initialize beads with Dolt for sandbox/container targets
         is_sandbox = "prepare_sandbox" in self._context.step_outputs
         is_container = "prepare_container" in self._context.step_outputs
@@ -485,15 +499,42 @@ class RealStepHandler:
             preamble_parts.append(
                 "First, run /notify:notify to enable audio notifications."
             )
-        if not preamble_parts:
-            return task
-        preamble = " ".join(preamble_parts)
-        return f"{preamble}\n\n{task}"
+
+        suffix_parts: list[str] = []
+        if autonomous:
+            suffix_parts.append(
+                "IMPORTANT: When you have finished all tasks, do NOT exit the "
+                "conversation. Instead, summarize what you accomplished and wait "
+                "for the user to review your work. The user may have follow-up "
+                "questions or corrections."
+            )
+
+        parts = []
+        if preamble_parts:
+            parts.append(" ".join(preamble_parts))
+        parts.append(task)
+        if suffix_parts:
+            parts.append("\n".join(suffix_parts))
+        return "\n\n".join(parts)
 
     def _handle_start_agent(self, step: WorkflowStep) -> StepResult:
         env_name = step.params.get("sandbox_name") or step.params.get("container_name")
         task = step.params.get("task", "")
         autonomous = step.params.get("mode") == "autonomous"
+
+        # Inject context file content into the prompt
+        context_file = step.params.get("context_file")
+        if context_file:
+            src = Path(context_file).expanduser()
+            if src.is_file():
+                context_content = src.read_text()
+                task = (
+                    f"{task}\n\n"
+                    f"--- CONTEXT FILE: {src.name} ---\n"
+                    f"{context_content}\n"
+                    f"--- END CONTEXT FILE ---"
+                )
+
         task = self._enrich_prompt(task, autonomous)
 
         wt_output = self._context.step_outputs.get("create_worktree")
