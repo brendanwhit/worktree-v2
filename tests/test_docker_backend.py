@@ -248,8 +248,9 @@ class TestDryRunDockerBackend:
         backend = DryRunDockerBackend()
         result = backend.run_agent("test", "implement feature")
         assert result is True
+        assert "tmux new-session" in backend.commands[0]
         assert "docker sandbox run" in backend.commands[0]
-        assert "implement feature" in backend.commands[0]
+        assert "tmux attach" in backend.commands[2]
 
     def test_list_sandboxes_records_command(self):
         backend = DryRunDockerBackend()
@@ -266,7 +267,7 @@ class TestDryRunDockerBackend:
         backend.run_agent("test", "task")
         backend.stop_sandbox("test")
         backend.list_sandboxes()
-        assert len(backend.commands) == 7
+        assert len(backend.commands) == 9
 
     # -- Template operations --------------------------------------------------
 

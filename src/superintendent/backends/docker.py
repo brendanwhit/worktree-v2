@@ -1,5 +1,6 @@
 """DockerBackend protocol and implementations (Real, Mock, DryRun)."""
 
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -143,13 +144,37 @@ class RealDockerBackend:
     def run_agent(
         self, name: str, prompt: str, autonomous: bool = False, cwd: Path | None = None
     ) -> bool:
-        # Workspace is already set at create time; run just takes the sandbox name
-        # Spawn in a new terminal window so the user can monitor separately
         escaped_prompt = prompt.replace("'", "'\\''")
         skip = " --dangerously-skip-permissions" if autonomous else ""
-        shell_cmd = f"docker sandbox run '{name}' --{skip} '{escaped_prompt}'"
+        agent_cmd = f"docker sandbox run '{name}' --{skip} '{escaped_prompt}'"
         terminal = detect_terminal()
-        return terminal.spawn(shell_cmd, cwd or Path.cwd())
+        workspace = cwd or Path.cwd()
+
+        if not shutil.which("tmux"):
+            return terminal.spawn(agent_cmd, workspace)
+
+        # Run inside tmux so the agent survives terminal disconnects.
+        # The terminal window just attaches to the tmux session — if it
+        # closes or crashes, the agent keeps running and you can reattach.
+        session = f"sup-{name}"
+        subprocess.run(
+            ["tmux", "kill-session", "-t", session],
+            capture_output=True,
+        )
+        result = subprocess.run(
+            ["tmux", "new-session", "-d", "-s", session, "sh", "-c", agent_cmd],
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            # tmux failed — fall back to direct terminal spawn
+            return terminal.spawn(agent_cmd, workspace)
+
+        # Keep pane open after command exits so user can see what happened
+        subprocess.run(
+            ["tmux", "set-option", "-t", session, "remain-on-exit", "on"],
+            capture_output=True,
+        )
+        return terminal.spawn(f"tmux attach -t {session}", workspace)
 
     def list_sandboxes(self) -> list[str]:
         result = subprocess.run(
@@ -387,12 +412,18 @@ class DryRunDockerBackend:
     def run_agent(
         self,
         name: str,
-        prompt: str,
+        prompt: str,  # noqa: ARG002
         autonomous: bool = False,
         cwd: Path | None = None,
     ) -> bool:
         skip = " --dangerously-skip-permissions" if autonomous else ""
-        cmd = f"docker sandbox run {name} --{skip} '{prompt}'"
+        session = f"sup-{name}"
+        self.commands.append(
+            f"tmux new-session -d -s {session} sh -c "
+            f"'docker sandbox run {name} --{skip} ...'"
+        )
+        self.commands.append(f"tmux set-option -t {session} remain-on-exit on")
+        cmd = f"tmux attach -t {session}"
         if cwd:
             cmd += f"  # cwd={cwd}"
         self.commands.append(cmd)
