@@ -412,15 +412,16 @@ class DryRunDockerBackend:
     def run_agent(
         self,
         name: str,
-        prompt: str,  # noqa: ARG002
+        prompt: str,
         autonomous: bool = False,
         cwd: Path | None = None,
     ) -> bool:
         skip = " --dangerously-skip-permissions" if autonomous else ""
+        escaped = prompt.replace("'", "'\\''")
         session = f"sup-{name}"
         self.commands.append(
             f"tmux new-session -d -s {session} sh -c "
-            f"'docker sandbox run {name} --{skip} ...'"
+            f"'docker sandbox run {name} --{skip} {escaped!r}'"
         )
         self.commands.append(f"tmux set-option -t {session} remain-on-exit on")
         cmd = f"tmux attach -t {session}"

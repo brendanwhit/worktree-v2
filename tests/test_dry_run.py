@@ -574,3 +574,4 @@ class TestDryRunCommandContent:
         assert isinstance(docker, DryRunDockerBackend)
         run_cmds = [c for c in docker.commands if "sandbox run" in c]
         assert any("claude-my-repo" in c for c in run_cmds)
+        assert any("implement auth system" in c for c in run_cmds)

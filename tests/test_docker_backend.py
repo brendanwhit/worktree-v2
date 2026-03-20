@@ -250,6 +250,7 @@ class TestDryRunDockerBackend:
         assert result is True
         assert "tmux new-session" in backend.commands[0]
         assert "docker sandbox run" in backend.commands[0]
+        assert "implement feature" in backend.commands[0]
         assert "tmux attach" in backend.commands[2]
 
     def test_list_sandboxes_records_command(self):
