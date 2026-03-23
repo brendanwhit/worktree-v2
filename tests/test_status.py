@@ -81,8 +81,7 @@ class TestCheckAgentStatus:
         assert details["exit_code"] == "1"
         assert details["duration"] == "3m"
 
-    @patch("superintendent.cli.main._tmux_session_alive", return_value=True)
-    def test_running_tmux_alive(self, _mock_tmux, tmp_path: Path):
+    def test_running_started_but_not_done(self, tmp_path: Path):
         ralph = tmp_path / ".ralph"
         ralph.mkdir()
         (ralph / "agent-started").write_text("2026-03-23T10:00:00Z\n")
@@ -91,33 +90,6 @@ class TestCheckAgentStatus:
         status, details = check_agent_status(entry)
         assert status == "running"
         assert "start_time" in details
-
-    @patch("superintendent.cli.main._tmux_session_alive", return_value=False)
-    def test_terminated_tmux_dead(self, _mock_tmux, tmp_path: Path):
-        ralph = tmp_path / ".ralph"
-        ralph.mkdir()
-        (ralph / "agent-started").write_text("2026-03-23T10:00:00Z\n")
-
-        entry = self._make_entry(tmp_path)
-        status, details = check_agent_status(entry)
-        assert status == "terminated"
-        assert "start_time" in details
-
-    def test_entry_without_sandbox_name(self, tmp_path: Path):
-        """Entries without sandbox_name use entry.name for tmux session check."""
-        ralph = tmp_path / ".ralph"
-        ralph.mkdir()
-        (ralph / "agent-started").write_text("2026-03-23T10:00:00Z\n")
-
-        entry = WorktreeEntry(
-            name="my-entry",
-            repo="/tmp/repo",
-            branch="main",
-            worktree_path=str(tmp_path),
-        )
-        with patch("superintendent.cli.main._tmux_session_alive", return_value=False):
-            status, details = check_agent_status(entry)
-        assert status == "terminated"
 
 
 class TestFormatStatusLine:
@@ -146,10 +118,10 @@ class TestFormatStatusLine:
         assert "exit 1" in line
         assert "ran 3m" in line
 
-    def test_terminated_with_details(self):
+    def test_running_with_details(self):
         details = {"start_time": "2026-03-23T10:00:00Z"}
-        line = _format_status_line("my-entry", "terminated", details)
-        assert "no exit recorded" in line
+        line = _format_status_line("my-entry", "running", details)
+        assert "started" in line
 
 
 class TestStatusCommand:

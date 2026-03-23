@@ -793,17 +793,8 @@ def _time_ago(iso_timestamp: str) -> str:
         return iso_timestamp
 
 
-def _tmux_session_alive(session: str) -> bool:
-    """Check if a tmux session exists."""
-    result = subprocess.run(
-        ["tmux", "has-session", "-t", session],
-        capture_output=True,
-    )
-    return result.returncode == 0
-
-
 def check_agent_status(entry: WorktreeEntry) -> tuple[str, dict[str, str]]:
-    """Determine agent state from .ralph/ markers + host tmux session.
+    """Determine agent state from .ralph/ markers.
 
     Returns (status_string, details_dict) where details may include
     start_time, end_time, exit_code, and duration.
@@ -841,12 +832,8 @@ def check_agent_status(entry: WorktreeEntry) -> tuple[str, dict[str, str]]:
             return ("completed", details)
         return ("failed", details)
 
-    # Started but not done — check tmux
-    session = f"sup-{entry.sandbox_name or entry.name}"
-    if _tmux_session_alive(session):
-        return ("running", details)
-
-    return ("terminated", details)
+    # Started but not done — agent is still running (or was killed)
+    return ("running", details)
 
 
 def _format_status_line(name: str, status: str, details: dict[str, str]) -> str:
@@ -861,10 +848,6 @@ def _format_status_line(name: str, status: str, details: dict[str, str]) -> str:
             info_parts.append(f"ran {details['duration']}")
         if "end_time" in details:
             info_parts.append(f"ended {_time_ago(details['end_time'])}")
-    elif status == "terminated" and "start_time" in details:
-        info_parts.append(f"started {_time_ago(details['start_time'])}")
-        info_parts.append("no exit recorded")
-
     info = f"  ({', '.join(info_parts)})" if info_parts else ""
     return f"{name}:  {status}{info}"
 
