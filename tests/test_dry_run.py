@@ -148,6 +148,10 @@ class TestDryRunSandboxCommands:
         tmux_cmds = [c for c in docker.commands if "tmux" in c]
         assert any("new-session" in c for c in tmux_cmds)
         assert any("attach" in c for c in tmux_cmds)
+        # Lifecycle wrapper markers present in the tmux command
+        assert any("agent-started" in c for c in tmux_cmds)
+        assert any("agent-exit-code" in c for c in tmux_cmds)
+        assert any("agent-done" in c for c in tmux_cmds)
 
 
 class TestDryRunLocalCommands:

@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
@@ -758,6 +759,142 @@ def token_status() -> None:
             typer.echo(
                 f"  {key}: {masked} (created: {entry.created_at}, permissions: {perms})"
             )
+
+
+def _read_marker(path: Path) -> str | None:
+    """Read a lifecycle marker file, returning stripped content or None."""
+    try:
+        return path.read_text().strip()
+    except OSError:
+        return None
+
+
+def _format_duration(seconds: float) -> str:
+    """Format seconds into a human-readable duration string."""
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    minutes = int(seconds // 60)
+    if minutes < 60:
+        return f"{minutes}m"
+    hours = minutes // 60
+    remaining = minutes % 60
+    if remaining:
+        return f"{hours}h {remaining}m"
+    return f"{hours}h"
+
+
+def _time_ago(iso_timestamp: str) -> str:
+    """Format an ISO timestamp as a human-readable 'ago' string."""
+    try:
+        ts = datetime.fromisoformat(iso_timestamp).replace(tzinfo=UTC)
+        delta = datetime.now(UTC) - ts
+        return f"{_format_duration(delta.total_seconds())} ago"
+    except (ValueError, TypeError):
+        return iso_timestamp
+
+
+def _tmux_session_alive(session: str) -> bool:
+    """Check if a tmux session exists."""
+    result = subprocess.run(
+        ["tmux", "has-session", "-t", session],
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def check_agent_status(entry: WorktreeEntry) -> tuple[str, dict[str, str]]:
+    """Determine agent state from .ralph/ markers + host tmux session.
+
+    Returns (status_string, details_dict) where details may include
+    start_time, end_time, exit_code, and duration.
+    """
+    details: dict[str, str] = {}
+
+    worktree = Path(entry.worktree_path)
+    ralph_dir = worktree / ".ralph"
+
+    if not ralph_dir.is_dir():
+        return ("not_started", details)
+
+    started = _read_marker(ralph_dir / "agent-started")
+    done = _read_marker(ralph_dir / "agent-done")
+    exit_code = _read_marker(ralph_dir / "agent-exit-code")
+
+    if not started:
+        return ("not_started", details)
+
+    details["start_time"] = started
+
+    if done:
+        details["end_time"] = done
+        if exit_code is not None:
+            details["exit_code"] = exit_code
+        # Compute duration
+        try:
+            t_start = datetime.fromisoformat(started).replace(tzinfo=UTC)
+            t_end = datetime.fromisoformat(done).replace(tzinfo=UTC)
+            details["duration"] = _format_duration((t_end - t_start).total_seconds())
+        except (ValueError, TypeError):
+            pass
+
+        if exit_code == "0":
+            return ("completed", details)
+        return ("failed", details)
+
+    # Started but not done — check tmux
+    session = f"sup-{entry.sandbox_name or entry.name}"
+    if _tmux_session_alive(session):
+        return ("running", details)
+
+    return ("terminated", details)
+
+
+def _format_status_line(name: str, status: str, details: dict[str, str]) -> str:
+    """Format a single status line for display."""
+    info_parts: list[str] = []
+    if status == "running" and "start_time" in details:
+        info_parts.append(f"started {_time_ago(details['start_time'])}")
+    elif status in ("completed", "failed"):
+        if "exit_code" in details:
+            info_parts.append(f"exit {details['exit_code']}")
+        if "duration" in details:
+            info_parts.append(f"ran {details['duration']}")
+        if "end_time" in details:
+            info_parts.append(f"ended {_time_ago(details['end_time'])}")
+    elif status == "terminated" and "start_time" in details:
+        info_parts.append(f"started {_time_ago(details['start_time'])}")
+        info_parts.append("no exit recorded")
+
+    info = f"  ({', '.join(info_parts)})" if info_parts else ""
+    return f"{name}:  {status}{info}"
+
+
+@app.command()
+def status(
+    name: str | None = typer.Option(None, help="Filter by entry name."),
+) -> None:
+    """Show agent lifecycle status for registered entries."""
+    registry = get_default_registry()
+    entries = registry.list_all()
+
+    if not entries:
+        typer.echo("No entries found.")
+        return
+
+    if name:
+        entries = [e for e in entries if e.name == name]
+        if not entries:
+            typer.echo(f"No entry found with name '{name}'", err=True)
+            raise typer.Exit(code=1)
+
+    for entry in entries:
+        worktree = Path(entry.worktree_path)
+        if not worktree.exists():
+            typer.echo(f"{entry.name}:  no sandbox")
+            continue
+
+        agent_status, details = check_agent_status(entry)
+        typer.echo(_format_status_line(entry.name, agent_status, details))
 
 
 if __name__ == "__main__":

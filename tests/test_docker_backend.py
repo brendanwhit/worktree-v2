@@ -251,6 +251,10 @@ class TestDryRunDockerBackend:
         assert "tmux new-session" in backend.commands[0]
         assert "docker sandbox run" in backend.commands[0]
         assert "implement feature" in backend.commands[0]
+        # Lifecycle wrapper markers present in the tmux command
+        assert "agent-started" in backend.commands[0]
+        assert "agent-exit-code" in backend.commands[0]
+        assert "agent-done" in backend.commands[0]
         assert "tmux attach" in backend.commands[2]
 
     def test_list_sandboxes_records_command(self):

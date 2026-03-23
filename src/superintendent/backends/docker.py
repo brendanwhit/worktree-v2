@@ -150,8 +150,21 @@ class RealDockerBackend:
         terminal = detect_terminal()
         workspace = cwd or Path.cwd()
 
+        # Wrap with lifecycle markers if .ralph/ exists
+        ralph_dir = workspace / ".ralph"
+        if ralph_dir.is_dir():
+            run_cmd = (
+                f"date -u +%Y-%m-%dT%H:%M:%SZ > {ralph_dir}/agent-started; "
+                f"{agent_cmd}; "
+                f"_exit=$?; echo $_exit > {ralph_dir}/agent-exit-code; "
+                f"date -u +%Y-%m-%dT%H:%M:%SZ > {ralph_dir}/agent-done; "
+                f"exit $_exit"
+            )
+        else:
+            run_cmd = agent_cmd
+
         if not shutil.which("tmux"):
-            return terminal.spawn(agent_cmd, workspace)
+            return terminal.spawn(run_cmd, workspace)
 
         # Run inside tmux so the agent survives terminal disconnects.
         # The terminal window just attaches to the tmux session — if it
@@ -162,12 +175,12 @@ class RealDockerBackend:
             capture_output=True,
         )
         result = subprocess.run(
-            ["tmux", "new-session", "-d", "-s", session, "sh", "-c", agent_cmd],
+            ["tmux", "new-session", "-d", "-s", session, "sh", "-c", run_cmd],
             capture_output=True,
         )
         if result.returncode != 0:
             # tmux failed — fall back to direct terminal spawn
-            return terminal.spawn(agent_cmd, workspace)
+            return terminal.spawn(run_cmd, workspace)
 
         # Keep pane open after command exits so user can see what happened
         subprocess.run(
@@ -418,11 +431,19 @@ class DryRunDockerBackend:
     ) -> bool:
         skip = " --dangerously-skip-permissions" if autonomous else ""
         escaped = prompt.replace("'", "'\\''")
+        agent_cmd = f"docker sandbox run {name} --{skip} {escaped!r}"
         session = f"sup-{name}"
-        self.commands.append(
-            f"tmux new-session -d -s {session} sh -c "
-            f"'docker sandbox run {name} --{skip} {escaped!r}'"
+        # Show lifecycle wrapper — in real mode this writes markers to .ralph/
+        workspace = cwd or Path(".")
+        ralph_dir = workspace / ".ralph"
+        run_cmd = (
+            f"date -u +%Y-%m-%dT%H:%M:%SZ > {ralph_dir}/agent-started; "
+            f"{agent_cmd}; "
+            f"_exit=$?; echo $_exit > {ralph_dir}/agent-exit-code; "
+            f"date -u +%Y-%m-%dT%H:%M:%SZ > {ralph_dir}/agent-done; "
+            f"exit $_exit"
         )
+        self.commands.append(f"tmux new-session -d -s {session} sh -c '{run_cmd}'")
         self.commands.append(f"tmux set-option -t {session} remain-on-exit on")
         cmd = f"tmux attach -t {session}"
         if cwd:
