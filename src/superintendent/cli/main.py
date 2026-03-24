@@ -17,6 +17,7 @@ from pathlib import Path
 
 import typer
 
+from superintendent import __version__
 from superintendent.backends.factory import BackendMode, create_backends
 from superintendent.backends.git import DEFAULT_STALE_DAYS, GitBackend, RealGitBackend
 from superintendent.orchestrator.executor import Executor
@@ -48,9 +49,25 @@ _STEP_LABELS: dict[str, str] = {
     "start_agent": "Starting agent...",
 }
 
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"superintendent {__version__}")
+        raise typer.Exit()
+
+
 app = typer.Typer(name="superintendent", no_args_is_help=True)
 token_app = typer.Typer(name="token", help="Manage scoped GitHub tokens.")
 app.add_typer(token_app)
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        False, "--version", "-V", callback=_version_callback, is_eager=True,
+        help="Show version and exit.",
+    ),
+) -> None:
+    """Agent orchestration CLI for spawning autonomous Claude agents."""
 
 
 def get_default_registry() -> WorktreeRegistry:

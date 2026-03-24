@@ -132,6 +132,19 @@ uv run ruff format --check src/ tests/     # Format clean (not same as lint!)
 
 **Note:** Integration tests that run `git commit` need `user.name` and `user.email` configured in test setup.
 
+## Versioning
+
+This project uses [SemVer](https://semver.org/). The version lives in two places that **must stay in sync**:
+- `pyproject.toml` (`version = "X.Y.Z"`)
+- `src/superintendent/__init__.py` (`__version__ = "X.Y.Z"`)
+
+**Before creating a PR**, bump the version based on the scope of your changes:
+- **Patch** (0.2.0 → 0.2.1): Bug fixes, minor internal changes
+- **Minor** (0.2.0 → 0.3.0): New features, new CLI commands, non-breaking API changes
+- **Major** (0.2.0 → 1.0.0): Breaking changes to CLI interface or public API
+
+CI will block PRs that don't bump the version.
+
 ## Autonomous Agent Rules
 
 These rules apply when running as an unsupervised autonomous agent (e.g. Ralph in a Docker sandbox).

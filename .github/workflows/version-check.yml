@@ -1,0 +1,46 @@
+name: Version Check
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  version-bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check version was bumped
+        run: |
+          # Get version from the PR branch
+          PR_VERSION=$(grep '^version' pyproject.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+
+          # Get version from main
+          MAIN_VERSION=$(git show origin/main:pyproject.toml | grep '^version' | head -1 | sed 's/.*"\(.*\)".*/\1/')
+
+          echo "Main version: $MAIN_VERSION"
+          echo "PR version:   $PR_VERSION"
+
+          if [ "$PR_VERSION" = "$MAIN_VERSION" ]; then
+            echo "::error::Version was not bumped. Please update the version in pyproject.toml and src/superintendent/__init__.py"
+            exit 1
+          fi
+
+          echo "Version bumped: $MAIN_VERSION -> $PR_VERSION"
+
+      - name: Check version consistency
+        run: |
+          PYPROJECT_VERSION=$(grep '^version' pyproject.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          INIT_VERSION=$(grep '__version__' src/superintendent/__init__.py | sed 's/.*"\(.*\)".*/\1/')
+
+          echo "pyproject.toml: $PYPROJECT_VERSION"
+          echo "__init__.py:    $INIT_VERSION"
+
+          if [ "$PYPROJECT_VERSION" != "$INIT_VERSION" ]; then
+            echo "::error::Version mismatch between pyproject.toml ($PYPROJECT_VERSION) and __init__.py ($INIT_VERSION)"
+            exit 1
+          fi
+
+          echo "Versions are consistent"
