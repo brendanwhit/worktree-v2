@@ -22,6 +22,17 @@ from superintendent.orchestrator.reporter import MockReporter
 from superintendent.orchestrator.sources.models import Task, TaskStatus
 from superintendent.orchestrator.sources.protocol import TaskSource
 from superintendent.orchestrator.strategy import ExecutionDecision, TaskInfo
+from superintendent.state.token_store import TokenStore
+
+
+def _mock_token_store(tmp_path: Path | None = None) -> TokenStore:
+    """Create a TokenStore with a dummy default token for testing."""
+    import tempfile
+
+    path = (tmp_path / "tokens.json") if tmp_path else Path(tempfile.mktemp())
+    store = TokenStore(path=path)
+    store.add("_default", "ghp_test_orchestrator", github_user="test")
+    return store
 
 
 def _mock_backends(**overrides) -> Backends:
@@ -96,6 +107,7 @@ class TestOrchestratorBasic:
             reporter=reporter,
             max_parallel=3,
             poll_interval=0,
+            token_store=_mock_token_store(tmp_path),
         )
         result = asyncio.run(orch.run(decision, repo=str(repo_path)))
 
@@ -127,6 +139,7 @@ class TestOrchestratorBasic:
             reporter=reporter,
             max_parallel=3,
             poll_interval=0,
+            token_store=_mock_token_store(tmp_path),
         )
         result = asyncio.run(orch.run(decision, repo=str(repo_path)))
 
@@ -152,6 +165,7 @@ class TestOrchestratorBasic:
             reporter=reporter,
             max_parallel=3,
             poll_interval=0,
+            token_store=_mock_token_store(tmp_path),
         )
         result = asyncio.run(orch.run(decision, repo=str(repo_path)))
 
@@ -170,6 +184,7 @@ class TestOrchestratorBasic:
             backends=backends,
             reporter=reporter,
             poll_interval=0,
+            token_store=_mock_token_store(tmp_path),
         )
         result = asyncio.run(orch.run(decision, repo=str(repo_path)))
 
@@ -202,6 +217,7 @@ class TestOrchestratorParallelism:
             reporter=reporter,
             max_parallel=2,
             poll_interval=0,
+            token_store=_mock_token_store(tmp_path),
         )
         result = asyncio.run(orch.run(decision, repo=str(repo_path)))
 
@@ -237,6 +253,7 @@ class TestOrchestratorParallelism:
             reporter=reporter,
             max_parallel=1,
             poll_interval=0,
+            token_store=_mock_token_store(tmp_path),
         )
         result = asyncio.run(orch.run(decision, repo=str(repo_path)))
 
@@ -266,6 +283,7 @@ class TestOrchestratorFailureSkip:
             reporter=reporter,
             poll_interval=0,
             failure_policy=FailurePolicy.SKIP,
+            token_store=_mock_token_store(tmp_path),
         )
         result = asyncio.run(orch.run(decision, repo=str(repo_path)))
 
@@ -300,6 +318,7 @@ class TestOrchestratorFailureSkip:
             max_parallel=3,
             poll_interval=0,
             failure_policy=FailurePolicy.SKIP,
+            token_store=_mock_token_store(tmp_path),
         )
         result = asyncio.run(orch.run(decision, repo=str(repo_path)))
 
@@ -323,6 +342,7 @@ class TestOrchestratorFailureSkip:
             reporter=reporter,
             poll_interval=0,
             failure_policy=FailurePolicy.SKIP,
+            token_store=_mock_token_store(tmp_path),
         )
         result = asyncio.run(orch.run(decision, repo=str(repo_path)))
 
@@ -361,6 +381,7 @@ class TestOrchestratorFailureAbort:
             max_parallel=1,  # serialize so abort takes effect
             poll_interval=0,
             failure_policy=FailurePolicy.ABORT,
+            token_store=_mock_token_store(tmp_path),
         )
         result = asyncio.run(orch.run(decision, repo=str(repo_path)))
 
@@ -391,6 +412,7 @@ class TestOrchestratorFailureRetry:
             poll_interval=0,
             failure_policy=FailurePolicy.RETRY,
             max_retries=2,
+            token_store=_mock_token_store(tmp_path),
         )
         result = asyncio.run(orch.run(decision, repo=str(repo_path)))
 
@@ -415,6 +437,7 @@ class TestOrchestratorFailureRetry:
             poll_interval=0,
             failure_policy=FailurePolicy.RETRY,
             max_retries=1,
+            token_store=_mock_token_store(tmp_path),
         )
         result = asyncio.run(orch.run(decision, repo=str(repo_path)))
 
@@ -442,6 +465,7 @@ class TestOrchestratorAgentStatus:
             backends=backends,
             reporter=reporter,
             poll_interval=0,
+            token_store=_mock_token_store(tmp_path),
         )
         result = asyncio.run(orch.run(decision, repo=str(repo_path)))
 
@@ -452,7 +476,9 @@ class TestOrchestratorAgentStatus:
         """Sandbox agent returns COMPLETED when exec returns (0, '')."""
         backends = _mock_backends()
 
-        orch = Orchestrator(backends=backends, poll_interval=0)
+        orch = Orchestrator(
+            backends=backends, poll_interval=0, token_store=_mock_token_store()
+        )
         handle = AgentHandle(
             id="test-1",
             task_group=[TaskInfo(name="t")],
@@ -468,7 +494,9 @@ class TestOrchestratorAgentStatus:
         docker = MockDockerBackend(exec_results={_AGENT_STATUS_CMD: (1, "")})
         backends = _mock_backends(docker=docker)
 
-        orch = Orchestrator(backends=backends, poll_interval=0)
+        orch = Orchestrator(
+            backends=backends, poll_interval=0, token_store=_mock_token_store()
+        )
         handle = AgentHandle(
             id="test-1",
             task_group=[TaskInfo(name="t")],
@@ -483,7 +511,9 @@ class TestOrchestratorAgentStatus:
         docker = MockDockerBackend(exec_results={_AGENT_STATUS_CMD: (0, "1")})
         backends = _mock_backends(docker=docker)
 
-        orch = Orchestrator(backends=backends, poll_interval=0)
+        orch = Orchestrator(
+            backends=backends, poll_interval=0, token_store=_mock_token_store()
+        )
         handle = AgentHandle(
             id="test-1",
             task_group=[TaskInfo(name="t")],
@@ -496,7 +526,9 @@ class TestOrchestratorAgentStatus:
     def test_no_sandbox_name_returns_completed(self) -> None:
         """Handle with no sandbox_name returns COMPLETED."""
         backends = _mock_backends()
-        orch = Orchestrator(backends=backends, poll_interval=0)
+        orch = Orchestrator(
+            backends=backends, poll_interval=0, token_store=_mock_token_store()
+        )
         handle = AgentHandle(
             id="test-1",
             task_group=[TaskInfo(name="t")],
@@ -523,6 +555,7 @@ class TestOrchestratorReporter:
             backends=backends,
             reporter=reporter,
             poll_interval=0,
+            token_store=_mock_token_store(tmp_path),
         )
         asyncio.run(orch.run(decision, repo=str(repo_path)))
 
@@ -544,6 +577,7 @@ class TestOrchestratorReporter:
             backends=backends,
             reporter=reporter,
             poll_interval=0,
+            token_store=_mock_token_store(tmp_path),
         )
         asyncio.run(orch.run(decision, repo=str(repo_path)))
 
@@ -566,6 +600,7 @@ class TestOrchestratorReporter:
             reporter=reporter,
             poll_interval=0,
             failure_policy=FailurePolicy.SKIP,
+            token_store=_mock_token_store(tmp_path),
         )
         asyncio.run(orch.run(decision, repo=str(repo_path)))
 
@@ -591,6 +626,7 @@ class TestOrchestratorReporter:
             reporter=reporter,
             max_parallel=3,
             poll_interval=0,
+            token_store=_mock_token_store(tmp_path),
         )
         asyncio.run(orch.run(decision, repo=str(repo_path)))
 
@@ -610,6 +646,7 @@ class TestOrchestratorReporter:
             backends=backends,
             reporter=reporter,
             poll_interval=0,
+            token_store=_mock_token_store(tmp_path),
         )
         asyncio.run(orch.run(decision, repo=str(repo_path)))
 
@@ -632,6 +669,7 @@ class TestOrchestratorTaskSource:
             backends=backends,
             task_source=task_source,
             poll_interval=0,
+            token_store=_mock_token_store(tmp_path),
         )
         asyncio.run(orch.run(decision, repo=str(repo_path)))
 
@@ -652,6 +690,7 @@ class TestOrchestratorTaskSource:
             task_source=task_source,
             poll_interval=0,
             failure_policy=FailurePolicy.SKIP,
+            token_store=_mock_token_store(tmp_path),
         )
         asyncio.run(orch.run(decision, repo=str(repo_path)))
 
@@ -678,6 +717,7 @@ class TestOrchestratorTaskSource:
             backends=backends,
             task_source=task_source,
             poll_interval=0,
+            token_store=_mock_token_store(tmp_path),
         )
         result = asyncio.run(orch.run(decision, repo=str(repo_path)))
 
@@ -707,6 +747,7 @@ class TestOrchestratorTaskSource:
             backends=backends,
             task_source=task_source,
             poll_interval=0,
+            token_store=_mock_token_store(tmp_path),
         )
         result = asyncio.run(orch.run(decision, repo=str(repo_path)))
 
@@ -729,6 +770,7 @@ class TestOrchestratorResult:
         orch = Orchestrator(
             backends=backends,
             poll_interval=0,
+            token_store=_mock_token_store(tmp_path),
         )
         result = asyncio.run(orch.run(decision, repo=str(repo_path)))
 
@@ -747,6 +789,7 @@ class TestOrchestratorResult:
             backends=backends,
             poll_interval=0,
             failure_policy=FailurePolicy.SKIP,
+            token_store=_mock_token_store(tmp_path),
         )
         result = asyncio.run(orch.run(decision, repo=str(repo_path)))
 
@@ -774,6 +817,7 @@ class TestOrchestratorContainerTarget:
             backends=backends,
             reporter=reporter,
             poll_interval=0,
+            token_store=_mock_token_store(tmp_path),
         )
         result = asyncio.run(orch.run(decision, repo=str(repo_path)))
 

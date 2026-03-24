@@ -1097,8 +1097,11 @@ class TestFullPlanExecution:
         repo_path = tmp_path / "my-repo"
         git = MockGitBackend(local_repos={str(repo_path): repo_path})
         docker = MockDockerBackend()
+        store = TokenStore(path=tmp_path / "tokens.json")
+        store.add("_default", "ghp_test", github_user="test")
         ctx = ExecutionContext(
             backends=_mock_backends(git=git, docker=docker),
+            token_store=store,
         )
         handler = RealStepHandler(ctx)
         executor = Executor(handler=handler)
@@ -1120,8 +1123,11 @@ class TestFullPlanExecution:
         repo_path = tmp_path / "my-repo"
         git = MockGitBackend(local_repos={str(repo_path): repo_path})
         docker = MockDockerBackend()
+        store = TokenStore(path=tmp_path / "tokens.json")
+        store.add("_default", "ghp_test", github_user="test")
         ctx = ExecutionContext(
             backends=_mock_backends(git=git, docker=docker),
+            token_store=store,
         )
         handler = RealStepHandler(ctx)
         executor = Executor(handler=handler)

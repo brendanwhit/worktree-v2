@@ -19,6 +19,7 @@ from superintendent.orchestrator.sources.models import TaskStatus
 from superintendent.orchestrator.sources.protocol import TaskSource
 from superintendent.orchestrator.step_handler import ExecutionContext, RealStepHandler
 from superintendent.orchestrator.strategy import ExecutionDecision, TaskInfo
+from superintendent.state.token_store import TokenStore
 from superintendent.state.workflow import WorkflowState
 
 
@@ -94,6 +95,7 @@ class Orchestrator:
         poll_interval: float = 5.0,
         failure_policy: FailurePolicy = FailurePolicy.SKIP,
         max_retries: int = 1,
+        token_store: TokenStore | None = None,
     ) -> None:
         self._backends = backends
         self._task_source = task_source
@@ -102,6 +104,7 @@ class Orchestrator:
         self._poll_interval = poll_interval
         self._failure_policy = failure_policy
         self._max_retries = max_retries
+        self._token_store = token_store or TokenStore()
         self._planner = Planner()
         self._agent_counter = 0
 
@@ -250,7 +253,7 @@ class Orchestrator:
         except ValueError:
             return None
 
-        ctx = ExecutionContext(backends=self._backends)
+        ctx = ExecutionContext(backends=self._backends, token_store=self._token_store)
         handler = RealStepHandler(ctx)
         executor = Executor(handler=handler)
         exec_result = executor.run(plan)
