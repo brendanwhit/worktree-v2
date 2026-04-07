@@ -42,6 +42,12 @@ class TestVerbosityFlags:
         """Set up mocks for a successful run command."""
         mock_planner = MagicMock()
         mock_plan = MagicMock()
+        mock_plan.metadata = {
+            "branch": "agent/repo",
+            "repo_name": "repo",
+            "target": "sandbox",
+            "sandbox_name": "claude-repo",
+        }
         mock_planner.create_plan.return_value = mock_plan
 
         mock_executor = MagicMock()
@@ -56,6 +62,7 @@ class TestVerbosityFlags:
         with (
             patch("superintendent.cli.main.Planner") as mock_planner_cls,
             patch("superintendent.cli.main.Executor") as mock_executor_cls,
+            patch("superintendent.cli.main.get_default_registry"),
         ):
             mock_planner, mock_executor = self._mock_run_success()
             mock_planner_cls.return_value = mock_planner
@@ -80,6 +87,7 @@ class TestVerbosityFlags:
         with (
             patch("superintendent.cli.main.Planner") as mock_planner_cls,
             patch("superintendent.cli.main.Executor") as mock_executor_cls,
+            patch("superintendent.cli.main.get_default_registry"),
         ):
             mock_planner, mock_executor = self._mock_run_success()
             mock_planner_cls.return_value = mock_planner
@@ -104,6 +112,7 @@ class TestVerbosityFlags:
         with (
             patch("superintendent.cli.main.Planner") as mock_planner_cls,
             patch("superintendent.cli.main.Executor") as mock_executor_cls,
+            patch("superintendent.cli.main.get_default_registry"),
         ):
             mock_planner, mock_executor = self._mock_run_success()
             mock_planner_cls.return_value = mock_planner
@@ -128,6 +137,7 @@ class TestVerbosityFlags:
         with (
             patch("superintendent.cli.main.Planner") as mock_planner_cls,
             patch("superintendent.cli.main.Executor") as mock_executor_cls,
+            patch("superintendent.cli.main.get_default_registry"),
         ):
             mock_planner, mock_executor = self._mock_run_success()
             mock_planner_cls.return_value = mock_planner
