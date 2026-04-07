@@ -152,6 +152,10 @@ class GitBackend(Protocol):
         """Check if the branch has commits not pushed to the remote."""
         ...
 
+    def remove_worktree(self, repo: Path, target: Path) -> bool:
+        """Remove a git worktree."""
+        ...
+
     def clone_for_sandbox(self, source: Path, target: Path, branch: str) -> bool:
         """Clone a repo for sandbox use (standalone, no worktree references)."""
         ...
@@ -274,6 +278,14 @@ class RealGitBackend:
     ) -> bool:
         result = subprocess.run(
             ["git", "-C", str(repo), "worktree", "add", str(target), branch],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0
+
+    def remove_worktree(self, repo: Path, target: Path) -> bool:
+        result = subprocess.run(
+            ["git", "-C", str(repo), "worktree", "remove", "--force", str(target)],
             capture_output=True,
             text=True,
         )
@@ -599,6 +611,9 @@ class MockGitBackend:
         self.worktrees.append((repo, branch, target))
         return True
 
+    def remove_worktree(self, repo: Path, target: Path) -> bool:  # noqa: ARG002
+        return self.fail_on != "remove_worktree"
+
     def get_branch_age_days(self, repo: Path, branch: str) -> float | None:  # noqa: ARG002
         if self.fail_on == "get_branch_age_days":
             return None
@@ -672,6 +687,10 @@ class DryRunGitBackend:
         self, repo: Path, branch: str, target: Path
     ) -> bool:
         self.commands.append(f"git -C {repo} worktree add {target} {branch}")
+        return True
+
+    def remove_worktree(self, repo: Path, target: Path) -> bool:
+        self.commands.append(f"git -C {repo} worktree remove --force {target}")
         return True
 
     def get_branch_age_days(self, repo: Path, branch: str) -> float | None:

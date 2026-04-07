@@ -315,6 +315,153 @@ class TestCreateWorktreeHandler:
         assert result.success is False
         assert "clone for sandbox" in result.message
 
+    def test_reuse_existing_worktree_and_branch(self, tmp_path, monkeypatch):
+        """Scenario 1: worktree path + branch both exist — reuse without creating."""
+        repo_path = tmp_path / "repo"
+        git = MockGitBackend(known_branches={"agent/test"})
+        ctx = ExecutionContext(backends=_mock_backends(git=git))
+        ctx.step_outputs["validate_repo"] = {"repo_path": str(repo_path)}
+        handler = RealStepHandler(ctx)
+
+        # Make the worktree path exist
+        worktree_dir = tmp_path / "worktrees" / "test" / "agent-test"
+        worktree_dir.mkdir(parents=True)
+        monkeypatch.setattr(
+            "superintendent.orchestrator.step_handler.default_worktrees_dir",
+            lambda: tmp_path / "worktrees",
+        )
+
+        step = WorkflowStep(
+            id="create_worktree",
+            action="create_worktree",
+            params={"branch": "agent/test", "repo_name": "test"},
+            depends_on=["validate_repo"],
+        )
+        result = handler.execute(step)
+
+        assert result.success is True
+        assert result.data["worktree_path"] == str(worktree_dir)
+        # Should NOT have called create_worktree or create_worktree_from_existing
+        assert len(git.worktrees) == 0
+
+    def test_attach_existing_branch_no_worktree(self, tmp_path, monkeypatch):
+        """Scenario 2: branch exists but no worktree — attach via create_worktree_from_existing."""
+        repo_path = tmp_path / "repo"
+        git = MockGitBackend(known_branches={"agent/test"})
+        ctx = ExecutionContext(backends=_mock_backends(git=git))
+        ctx.step_outputs["validate_repo"] = {"repo_path": str(repo_path)}
+        handler = RealStepHandler(ctx)
+
+        monkeypatch.setattr(
+            "superintendent.orchestrator.step_handler.default_worktrees_dir",
+            lambda: tmp_path / "worktrees",
+        )
+
+        step = WorkflowStep(
+            id="create_worktree",
+            action="create_worktree",
+            params={"branch": "agent/test", "repo_name": "test"},
+            depends_on=["validate_repo"],
+        )
+        result = handler.execute(step)
+
+        assert result.success is True
+        # Should have called create_worktree_from_existing (recorded in worktrees list)
+        assert len(git.worktrees) == 1
+        assert git.worktrees[0][1] == "agent/test"
+
+    def test_attach_existing_branch_failure(self, tmp_path, monkeypatch):
+        """Scenario 2 failure: branch exists, create_worktree_from_existing fails."""
+        repo_path = tmp_path / "repo"
+        git = MockGitBackend(
+            known_branches={"agent/test"},
+            fail_on="create_worktree_from_existing",
+        )
+        ctx = ExecutionContext(backends=_mock_backends(git=git))
+        ctx.step_outputs["validate_repo"] = {"repo_path": str(repo_path)}
+        handler = RealStepHandler(ctx)
+
+        monkeypatch.setattr(
+            "superintendent.orchestrator.step_handler.default_worktrees_dir",
+            lambda: tmp_path / "worktrees",
+        )
+
+        step = WorkflowStep(
+            id="create_worktree",
+            action="create_worktree",
+            params={"branch": "agent/test", "repo_name": "test"},
+            depends_on=["validate_repo"],
+        )
+        result = handler.execute(step)
+
+        assert result.success is False
+
+    def test_create_new_branch_and_worktree(self, tmp_path):
+        """Scenario 3: neither branch nor worktree exist — create new."""
+        repo_path = tmp_path / "repo"
+        git = MockGitBackend()  # no known_branches
+        ctx = ExecutionContext(backends=_mock_backends(git=git))
+        ctx.step_outputs["validate_repo"] = {"repo_path": str(repo_path)}
+        handler = RealStepHandler(ctx)
+
+        step = WorkflowStep(
+            id="create_worktree",
+            action="create_worktree",
+            params={"branch": "agent/test", "repo_name": "test"},
+            depends_on=["validate_repo"],
+        )
+        result = handler.execute(step)
+
+        assert result.success is True
+        assert len(git.worktrees) == 1
+
+    def test_force_removes_and_recreates(self, tmp_path, monkeypatch):
+        """--force: removes existing worktree and recreates from scratch."""
+        repo_path = tmp_path / "repo"
+        git = MockGitBackend(known_branches={"agent/test"})
+        ctx = ExecutionContext(backends=_mock_backends(git=git))
+        ctx.step_outputs["validate_repo"] = {"repo_path": str(repo_path)}
+        handler = RealStepHandler(ctx)
+
+        # Make the worktree path exist
+        worktree_dir = tmp_path / "worktrees" / "test" / "agent-test"
+        worktree_dir.mkdir(parents=True)
+        monkeypatch.setattr(
+            "superintendent.orchestrator.step_handler.default_worktrees_dir",
+            lambda: tmp_path / "worktrees",
+        )
+
+        step = WorkflowStep(
+            id="create_worktree",
+            action="create_worktree",
+            params={"branch": "agent/test", "repo_name": "test", "force": True},
+            depends_on=["validate_repo"],
+        )
+        result = handler.execute(step)
+
+        assert result.success is True
+        # Should have called create_worktree (new branch), not reused
+        assert len(git.worktrees) == 1
+
+    def test_force_without_existing_worktree_creates_new(self, tmp_path):
+        """--force with no existing worktree behaves like scenario 3."""
+        repo_path = tmp_path / "repo"
+        git = MockGitBackend()
+        ctx = ExecutionContext(backends=_mock_backends(git=git))
+        ctx.step_outputs["validate_repo"] = {"repo_path": str(repo_path)}
+        handler = RealStepHandler(ctx)
+
+        step = WorkflowStep(
+            id="create_worktree",
+            action="create_worktree",
+            params={"branch": "agent/test", "repo_name": "test", "force": True},
+            depends_on=["validate_repo"],
+        )
+        result = handler.execute(step)
+
+        assert result.success is True
+        assert len(git.worktrees) == 1
+
 
 # ---------------------------------------------------------------------------
 # Validate auth handler

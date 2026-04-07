@@ -99,6 +99,7 @@ class Planner:
                 params={
                     "branch": metadata["branch"],
                     "repo_name": metadata["repo_name"],
+                    "force": inputs.force,
                 },
                 depends_on=["validate_repo"],
             )

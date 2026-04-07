@@ -170,13 +170,28 @@ class RealStepHandler:
         branch = step.params["branch"]
         repo_name = step.params["repo_name"]
         standalone = step.params.get("standalone", False)
+        force = step.params.get("force", False)
         slug = branch.replace("/", "-")
         worktree_path = default_worktrees_dir() / repo_name / slug
         worktree_path.parent.mkdir(parents=True, exist_ok=True)
 
         if standalone:
             ok = git.clone_for_sandbox(repo_path, worktree_path, branch)
+        elif self._context.dry_run:
+            # Dry-run: always show the create command without checking filesystem
+            ok = git.create_worktree(repo_path, branch, worktree_path)
+        elif force and worktree_path.exists():
+            # --force: remove existing worktree and recreate from scratch
+            git.remove_worktree(repo_path, worktree_path)
+            ok = git.create_worktree(repo_path, branch, worktree_path)
+        elif worktree_path.exists() and git.branch_exists(repo_path, branch):
+            # Scenario 1: worktree + branch already exist — reuse
+            ok = True
+        elif git.branch_exists(repo_path, branch):
+            # Scenario 2: branch exists but no worktree — attach
+            ok = git.create_worktree_from_existing(repo_path, branch, worktree_path)
         else:
+            # Scenario 3: neither exists — create new branch + worktree
             ok = git.create_worktree(repo_path, branch, worktree_path)
 
         if not ok:
