@@ -358,7 +358,7 @@ class TestGetGitStatusTags:
         assert "clean" in tags
         assert "unpushed" not in tags
 
-    def test_pushed_dirty_unpushed(self, tmp_path: Path):
+    def test_remote_with_unpushed_commits(self, tmp_path: Path):
         wt = tmp_path / "wt"
         wt.mkdir()
         entry = WorktreeEntry(
@@ -373,11 +373,37 @@ class TestGetGitStatusTags:
             unpushed_branches={"feat"},
         )
         tags = get_git_status_tags(entry, git)
-        assert "pushed" in tags
+        assert "unpushed commits" in tags
         assert "dirty" in tags
-        assert "unpushed" in tags
 
-    def test_no_remote_clean(self, tmp_path: Path):
+    def test_pushed_and_synced(self, tmp_path: Path):
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(wt),
+        )
+        git = MockGitBackend(remote_branches={"feat"})
+        tags = get_git_status_tags(entry, git)
+        assert "pushed" in tags
+        assert "clean" in tags
+
+    def test_local_only_commits(self, tmp_path: Path):
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(wt),
+        )
+        git = MockGitBackend(unpushed_branches={"feat"})
+        tags = get_git_status_tags(entry, git)
+        assert "local only" in tags
+
+    def test_no_commits(self, tmp_path: Path):
         wt = tmp_path / "wt"
         wt.mkdir()
         entry = WorktreeEntry(
@@ -388,7 +414,7 @@ class TestGetGitStatusTags:
         )
         git = MockGitBackend(remote_branches=set())
         tags = get_git_status_tags(entry, git)
-        assert "no remote" in tags
+        assert "no commits" in tags
         assert "clean" in tags
 
     def test_missing_worktree_returns_empty(self):

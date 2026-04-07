@@ -915,23 +915,25 @@ def get_git_status_tags(
 
     tags: list[str] = []
 
-    # PR status
+    # PR / remote status (single dimension)
+    has_remote = git.remote_branch_exists(worktree_path, entry.branch)
+    has_unpushed = git.has_unpushed_commits(worktree_path, entry.branch)
     if git.has_merged_pr(worktree_path, entry.branch):
         tags.append("PR merged")
-    elif git.remote_branch_exists(worktree_path, entry.branch):
+    elif has_remote and has_unpushed:
+        tags.append("unpushed commits")
+    elif has_remote:
         tags.append("pushed")
+    elif has_unpushed:
+        tags.append("local only")
     else:
-        tags.append("no remote")
+        tags.append("no commits")
 
     # Working tree cleanliness
     if git.has_uncommitted_changes(worktree_path):
         tags.append("dirty")
     else:
         tags.append("clean")
-
-    # Unpushed commits
-    if git.has_unpushed_commits(worktree_path, entry.branch):
-        tags.append("unpushed")
 
     return tags
 
