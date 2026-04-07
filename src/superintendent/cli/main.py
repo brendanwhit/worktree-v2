@@ -973,7 +973,10 @@ def get_git_status_tags(
     else:
         # Fallback: per-entry fetch (used when called without prefetch)
         pr_state, pr_number = git.get_pr_status(worktree_path, entry.branch)
-        has_remote = git.remote_branch_exists(worktree_path, entry.branch)
+        # Only check remote if no PR — PR states already imply remote exists
+        has_remote = pr_state in ("merged", "open") or git.remote_branch_exists(
+            worktree_path, entry.branch
+        )
 
     if pr_state == "merged":
         tags.append("PR merged")
