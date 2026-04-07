@@ -34,6 +34,8 @@ def build_agent_command(
     skip = " --dangerously-skip-permissions" if autonomous else ""
     if sandbox_name:
         return f"docker sandbox run '{sandbox_name}' --{skip} '{escaped}'"
+    # Unset CLAUDECODE so the spawned agent doesn't inherit the parent's
+    # Claude Code session state, which causes conflicts with the new instance.
     return f"unset CLAUDECODE && claude{skip} '{escaped}'"
 
 
