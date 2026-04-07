@@ -900,6 +900,31 @@ def check_agent_status(entry: WorktreeEntry) -> tuple[str, dict[str, str]]:
     return ("running", details)
 
 
+def _get_github_url(worktree_path: Path) -> str | None:
+    """Extract the GitHub HTTPS URL from a worktree's origin remote."""
+    result = subprocess.run(
+        ["git", "-C", str(worktree_path), "remote", "get-url", "origin"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    url = result.stdout.strip()
+    # Normalize git@github.com:user/repo.git → https://github.com/user/repo
+    if url.startswith("git@github.com:"):
+        url = "https://github.com/" + url[len("git@github.com:") :]
+    if url.endswith(".git"):
+        url = url[:-4]
+    if "github.com" in url:
+        return url
+    return None
+
+
+def _hyperlink(url: str, text: str) -> str:
+    """Format text as a clickable terminal hyperlink (OSC 8)."""
+    return f"\033]8;;{url}\033\\{text}\033]8;;\033\\"
+
+
 def get_git_status_tags(
     entry: WorktreeEntry,
     git: GitBackend,
@@ -915,11 +940,23 @@ def get_git_status_tags(
 
     tags: list[str] = []
 
-    # PR / remote status (single dimension)
+    # Remote/PR state (single mutually exclusive dimension)
+    # Priority: PR merged > PR open > pushed+ahead > pushed > local only > no commits
     has_remote = git.remote_branch_exists(worktree_path, entry.branch)
     has_unpushed = git.has_unpushed_commits(worktree_path, entry.branch)
+    open_pr = git.has_open_pr(worktree_path, entry.branch)
     if git.has_merged_pr(worktree_path, entry.branch):
         tags.append("PR merged")
+    elif open_pr:
+        github_url = _get_github_url(worktree_path)
+        if github_url:
+            pr_label = _hyperlink(f"{github_url}/pull/{open_pr}", f"PR #{open_pr}")
+        else:
+            pr_label = f"PR #{open_pr}"
+        if has_unpushed:
+            tags.append(f"{pr_label}, unpushed commits")
+        else:
+            tags.append(pr_label)
     elif has_remote and has_unpushed:
         tags.append("unpushed commits")
     elif has_remote:
@@ -929,7 +966,7 @@ def get_git_status_tags(
     else:
         tags.append("no commits")
 
-    # Working tree cleanliness
+    # Working tree cleanliness (independent dimension)
     if git.has_uncommitted_changes(worktree_path):
         tags.append("dirty")
     else:

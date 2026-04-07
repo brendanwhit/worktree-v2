@@ -10,6 +10,7 @@ from superintendent.backends.git import MockGitBackend
 from superintendent.cli.main import (
     _format_duration,
     _format_status_line,
+    _hyperlink,
     _is_sandbox_alive,
     app,
     check_agent_status,
@@ -417,6 +418,61 @@ class TestGetGitStatusTags:
         assert "no commits" in tags
         assert "clean" in tags
 
+    def test_open_pr(self, tmp_path: Path):
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(wt),
+        )
+        git = MockGitBackend(
+            open_prs={"feat": 42},
+            remote_branches={"feat"},
+        )
+        tags = get_git_status_tags(entry, git)
+        assert "PR #42" in tags
+        assert "clean" in tags
+
+    def test_open_pr_with_unpushed(self, tmp_path: Path):
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(wt),
+        )
+        git = MockGitBackend(
+            open_prs={"feat": 17},
+            remote_branches={"feat"},
+            unpushed_branches={"feat"},
+        )
+        tags = get_git_status_tags(entry, git)
+        assert "PR #17, unpushed commits" in tags
+
+    def test_open_pr_with_hyperlink(self, tmp_path: Path):
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(wt),
+        )
+        git = MockGitBackend(
+            open_prs={"feat": 42},
+            remote_branches={"feat"},
+        )
+        with patch(
+            "superintendent.cli.main._get_github_url",
+            return_value="https://github.com/owner/repo",
+        ):
+            tags = get_git_status_tags(entry, git)
+        expected = _hyperlink("https://github.com/owner/repo/pull/42", "PR #42")
+        assert expected in tags
+
     def test_missing_worktree_returns_empty(self):
         entry = WorktreeEntry(
             name="test",
@@ -427,6 +483,16 @@ class TestGetGitStatusTags:
         git = MockGitBackend()
         tags = get_git_status_tags(entry, git)
         assert tags == []
+
+
+class TestHyperlink:
+    def test_hyperlink_format(self):
+        result = _hyperlink("https://example.com", "click me")
+        assert result == "\033]8;;https://example.com\033\\click me\033]8;;\033\\"
+
+    def test_hyperlink_contains_text(self):
+        result = _hyperlink("https://example.com", "PR #42")
+        assert "PR #42" in result
 
 
 class TestFormatStatusLineWithGitTags:
