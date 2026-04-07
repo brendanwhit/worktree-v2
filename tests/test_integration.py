@@ -12,9 +12,11 @@ from superintendent.backends.docker import MockDockerBackend
 from superintendent.backends.factory import Backends
 from superintendent.backends.git import MockGitBackend
 from superintendent.backends.terminal import MockTerminalBackend
+from superintendent.cli.main import _branch_to_slug, _extract_repo_name
 from superintendent.orchestrator.executor import Executor
 from superintendent.orchestrator.planner import Planner, PlannerInput
 from superintendent.orchestrator.step_handler import ExecutionContext, RealStepHandler
+from superintendent.state.registry import WorktreeEntry, WorktreeRegistry
 from superintendent.state.token_store import TokenStore
 from superintendent.state.workflow import WorkflowState
 
@@ -978,3 +980,105 @@ class TestStateTransitionsIntegration:
         assert len(executor.checkpoints) == 8
         for cp in executor.checkpoints:
             assert cp["success"] is True
+
+
+class TestRegistrationIntegration:
+    """Tests that run() registration logic produces correct WorktreeEntry fields.
+
+    These tests exercise the same registration logic that lives in the CLI's
+    run() command, but in isolation — building a plan, running it with mock
+    backends, and then applying the registration logic to a tmp_path registry.
+    """
+
+    def _run_and_register(
+        self, tmp_path: Path, target: str = "sandbox", sandbox_name: str | None = None
+    ) -> tuple[WorktreeRegistry, "WorktreeEntry"]:
+        repo_path = tmp_path / "my-repo"
+        git = MockGitBackend(local_repos={str(repo_path): repo_path})
+        docker = MockDockerBackend()
+        backends = _mock_backends(git=git, docker=docker)
+        ctx = ExecutionContext(
+            backends=backends, token_store=_test_token_store(tmp_path)
+        )
+        handler = RealStepHandler(ctx)
+        executor = Executor(handler=handler)
+
+        plan = Planner().create_plan(
+            PlannerInput(
+                repo=str(repo_path),
+                task="fix bug",
+                target=target,
+                sandbox_name=sandbox_name,
+            )
+        )
+        result = executor.run(plan)
+        assert result.error is None
+
+        # Apply the same registration logic as run()
+        registry = WorktreeRegistry(tmp_path / "test-registry.json")
+        worktree_path = ctx.step_outputs.get("create_worktree", {}).get(
+            "worktree_path", ""
+        )
+        branch_name = plan.metadata.get("branch", "")
+        repo_name = plan.metadata.get("repo_name", _extract_repo_name(str(repo_path)))
+        name = _branch_to_slug(branch_name) if branch_name else repo_name
+
+        target_val = plan.metadata.get("target")
+        if target_val == "sandbox":
+            env_name = plan.metadata.get("sandbox_name")
+        elif target_val == "container":
+            env_name = plan.metadata.get("container_name")
+        else:
+            env_name = None
+
+        entry = WorktreeEntry(
+            name=name,
+            repo=str(repo_path),
+            branch=branch_name,
+            worktree_path=worktree_path,
+            sandbox_name=env_name,
+        )
+        registry.add(entry)
+        return registry, entry
+
+    def test_sandbox_registration(self, tmp_path: Path):
+        """Sandbox target registers with sandbox_name set."""
+        registry, entry = self._run_and_register(tmp_path, target="sandbox")
+
+        entries = registry.list_all()
+        assert len(entries) == 1
+        assert entries[0].sandbox_name is not None
+        assert entries[0].sandbox_name.startswith("claude-")
+        assert entries[0].branch == "agent/my-repo"
+        assert entries[0].worktree_path != ""
+        # Registry file was created on disk
+        assert (tmp_path / "test-registry.json").exists()
+
+    def test_local_registration_no_sandbox_name(self, tmp_path: Path):
+        """Local target registers with sandbox_name=None."""
+        registry, entry = self._run_and_register(tmp_path, target="local")
+
+        entries = registry.list_all()
+        assert len(entries) == 1
+        assert entries[0].sandbox_name is None
+        assert entries[0].branch == "agent/my-repo"
+
+    def test_container_registration(self, tmp_path: Path):
+        """Container target registers with container_name as sandbox_name."""
+        registry, entry = self._run_and_register(tmp_path, target="container")
+
+        entries = registry.list_all()
+        assert len(entries) == 1
+        assert entries[0].sandbox_name is not None
+        assert entries[0].sandbox_name.startswith("claude-")
+        assert entries[0].branch == "agent/my-repo"
+
+    def test_custom_sandbox_name_registration(self, tmp_path: Path):
+        """Custom sandbox_name is preserved in registry entry."""
+        registry, entry = self._run_and_register(
+            tmp_path, target="sandbox", sandbox_name="my-custom"
+        )
+
+        entries = registry.list_all()
+        assert len(entries) == 1
+        assert entries[0].sandbox_name == "my-custom"

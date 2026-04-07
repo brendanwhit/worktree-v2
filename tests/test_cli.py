@@ -46,9 +46,16 @@ class TestRunCommand:
         with (
             patch("superintendent.cli.main.Planner") as mock_planner_cls,
             patch("superintendent.cli.main.Executor") as mock_executor_cls,
+            patch("superintendent.cli.main.get_default_registry"),
         ):
             mock_planner = MagicMock()
             mock_plan = MagicMock()
+            mock_plan.metadata = {
+                "branch": "agent/repo",
+                "repo_name": "repo",
+                "target": "sandbox",
+                "sandbox_name": "claude-repo",
+            }
             mock_planner.create_plan.return_value = mock_plan
             mock_planner_cls.return_value = mock_planner
 
@@ -80,9 +87,15 @@ class TestRunCommand:
         with (
             patch("superintendent.cli.main.Planner") as mock_planner_cls,
             patch("superintendent.cli.main.Executor") as mock_executor_cls,
+            patch("superintendent.cli.main.get_default_registry"),
         ):
             mock_planner = MagicMock()
             mock_plan = MagicMock()
+            mock_plan.metadata = {
+                "branch": "agent/repo",
+                "repo_name": "repo",
+                "target": "local",
+            }
             mock_planner.create_plan.return_value = mock_plan
             mock_planner_cls.return_value = mock_planner
 
@@ -114,9 +127,16 @@ class TestRunCommand:
         with (
             patch("superintendent.cli.main.Planner") as mock_planner_cls,
             patch("superintendent.cli.main.Executor") as mock_executor_cls,
+            patch("superintendent.cli.main.get_default_registry"),
         ):
             mock_planner = MagicMock()
             mock_plan = MagicMock()
+            mock_plan.metadata = {
+                "branch": "feature-branch",
+                "repo_name": "repo",
+                "target": "sandbox",
+                "sandbox_name": "my-sandbox",
+            }
             mock_planner.create_plan.return_value = mock_plan
             mock_planner_cls.return_value = mock_planner
 
@@ -274,9 +294,15 @@ class TestDangerouslySkipIsolation:
         with (
             patch("superintendent.cli.main.Planner") as mock_planner_cls,
             patch("superintendent.cli.main.Executor") as mock_executor_cls,
+            patch("superintendent.cli.main.get_default_registry"),
         ):
             mock_planner = MagicMock()
             mock_plan = MagicMock()
+            mock_plan.metadata = {
+                "branch": "agent/repo",
+                "repo_name": "repo",
+                "target": "local",
+            }
             mock_planner.create_plan.return_value = mock_plan
             mock_planner_cls.return_value = mock_planner
 
@@ -306,9 +332,15 @@ class TestDangerouslySkipIsolation:
         with (
             patch("superintendent.cli.main.Planner") as mock_planner_cls,
             patch("superintendent.cli.main.Executor") as mock_executor_cls,
+            patch("superintendent.cli.main.get_default_registry"),
         ):
             mock_planner = MagicMock()
             mock_plan = MagicMock()
+            mock_plan.metadata = {
+                "branch": "agent/repo",
+                "repo_name": "repo",
+                "target": "local",
+            }
             mock_planner.create_plan.return_value = mock_plan
             mock_planner_cls.return_value = mock_planner
 
@@ -337,9 +369,16 @@ class TestDangerouslySkipIsolation:
         with (
             patch("superintendent.cli.main.Planner") as mock_planner_cls,
             patch("superintendent.cli.main.Executor") as mock_executor_cls,
+            patch("superintendent.cli.main.get_default_registry"),
         ):
             mock_planner = MagicMock()
             mock_plan = MagicMock()
+            mock_plan.metadata = {
+                "branch": "agent/repo",
+                "repo_name": "repo",
+                "target": "sandbox",
+                "sandbox_name": "claude-repo",
+            }
             mock_planner.create_plan.return_value = mock_plan
             mock_planner_cls.return_value = mock_planner
 
