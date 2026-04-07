@@ -957,7 +957,7 @@ def prefetch_pr_statuses(
         worktree_path = Path(entry.worktree_path)
         return (entry.name, git.get_pr_status(worktree_path, entry.branch))
 
-    with ThreadPoolExecutor(max_workers=len(needs_fetch)) as pool:
+    with ThreadPoolExecutor(max_workers=min(len(needs_fetch), 5)) as pool:
         for name, pr_result in pool.map(_fetch, needs_fetch):
             results[name] = pr_result
 
