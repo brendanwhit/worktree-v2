@@ -929,37 +929,128 @@ def _hyperlink(url: str, text: str) -> str:
     return f"\033]8;;{url}\033\\{_UNDERLINE_ON}{text}{_UNDERLINE_OFF}\033]8;;\033\\"
 
 
-def prefetch_pr_statuses(
-    entries: list[WorktreeEntry],
-    git: GitBackend,
-) -> dict[str, tuple[str, int | None]]:
-    """Fetch PR statuses for all entries in parallel.
+@dataclass
+class EntryGitInfo:
+    """Pre-fetched git info for a single entry."""
 
-    Returns a dict mapping entry name to (state, pr_number).
-    Entries with cached merged_pr are skipped (no API call needed).
+    pr_state: str = "none"  # "merged", "open", "closed", "none"
+    pr_number: int | None = None
+    has_remote: bool = False
+
+
+def prefetch_git_info(
+    entries: list[WorktreeEntry],
+    repo_path: Path | None = None,
+) -> dict[str, EntryGitInfo]:
+    """Batch-fetch PR and remote branch info for all entries.
+
+    Makes exactly two network calls total (not per-entry):
+    1. gh pr list --state all (all PRs for the repo)
+    2. git ls-remote --heads (all remote branches)
+
+    Then matches results to entries by branch name.
+    Entries with cached merged_pr skip the PR lookup.
     """
     from concurrent.futures import ThreadPoolExecutor
 
-    needs_fetch: list[WorktreeEntry] = []
-    results: dict[str, tuple[str, int | None]] = {}
+    results: dict[str, EntryGitInfo] = {}
 
-    for entry in entries:
-        if entry.merged_pr:
-            results[entry.name] = ("merged", None)
-        elif Path(entry.worktree_path).exists():
-            needs_fetch.append(entry)
-        # Entries with missing worktree paths are skipped entirely
-
-    if not needs_fetch:
+    # Find a valid worktree path to run repo-level commands from
+    if repo_path is None:
+        for entry in entries:
+            if Path(entry.worktree_path).exists():
+                repo_path = Path(entry.worktree_path)
+                break
+    if repo_path is None:
         return results
 
-    def _fetch(entry: WorktreeEntry) -> tuple[str, tuple[str, int | None]]:
-        worktree_path = Path(entry.worktree_path)
-        return (entry.name, git.get_pr_status(worktree_path, entry.branch))
+    # Collect branches we need to look up
+    branch_to_entries: dict[str, list[WorktreeEntry]] = {}
+    for entry in entries:
+        if entry.merged_pr:
+            results[entry.name] = EntryGitInfo(pr_state="merged")
+        elif Path(entry.worktree_path).exists():
+            branch_to_entries.setdefault(entry.branch, []).append(entry)
 
-    with ThreadPoolExecutor(max_workers=min(len(needs_fetch), 5)) as pool:
-        for name, pr_result in pool.map(_fetch, needs_fetch):
-            results[name] = pr_result
+    if not branch_to_entries:
+        return results
+
+    # Two network calls in parallel: PRs + remote branches
+    def _fetch_prs() -> dict[str, tuple[str, int]]:
+        """Returns branch -> (state, number) for all PRs."""
+        result = subprocess.run(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--state",
+                "all",
+                "--json",
+                "number,state,headRefName",
+                "--limit",
+                "100",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(repo_path),
+        )
+        if result.returncode != 0:
+            return {}
+        import json
+
+        try:
+            prs = json.loads(result.stdout)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+        # Build branch -> best PR (prefer merged > open > closed)
+        branch_prs: dict[str, tuple[str, int]] = {}
+        priority = {"MERGED": 0, "OPEN": 1, "CLOSED": 2}
+        for pr in prs:
+            branch = pr.get("headRefName", "")
+            state = pr.get("state", "")
+            number = pr.get("number")
+            if branch and state and number is not None:
+                existing = branch_prs.get(branch)
+                if existing is None or priority.get(state, 99) < priority.get(
+                    existing[0], 99
+                ):
+                    branch_prs[branch] = (state.lower(), number)
+        return branch_prs
+
+    def _fetch_remotes() -> set[str]:
+        """Returns set of remote branch names."""
+        result = subprocess.run(
+            ["git", "-C", str(repo_path), "ls-remote", "--heads"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return set()
+        branches = set()
+        for line in result.stdout.splitlines():
+            # Format: <sha>\trefs/heads/<branch>
+            parts = line.split("\t")
+            if len(parts) == 2:
+                ref = parts[1]
+                branches.add(ref.removeprefix("refs/heads/"))
+        return branches
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        pr_future = pool.submit(_fetch_prs)
+        remote_future = pool.submit(_fetch_remotes)
+        pr_map = pr_future.result()
+        remote_set = remote_future.result()
+
+    # Match results to entries
+    for branch, entry_list in branch_to_entries.items():
+        pr_info = pr_map.get(branch)
+        has_remote = branch in remote_set
+        for entry in entry_list:
+            info = EntryGitInfo(has_remote=has_remote)
+            if pr_info is not None:
+                info.pr_state = pr_info[0]
+                info.pr_number = pr_info[1]
+            results[entry.name] = info
 
     return results
 
@@ -968,7 +1059,7 @@ def get_git_status_tags(
     entry: WorktreeEntry,
     git: GitBackend,
     registry: WorktreeRegistry | None = None,
-    pr_status: tuple[str, int | None] | None = None,
+    git_info: "EntryGitInfo | None" = None,
 ) -> list[str]:
     """Gather git-level status tags for an entry.
 
@@ -979,8 +1070,8 @@ def get_git_status_tags(
     to avoid repeated network calls. Updates the registry when cache misses
     are resolved.
 
-    If pr_status is provided (from prefetch_pr_statuses), uses it instead
-    of making its own API call.
+    If git_info is provided (from prefetch_git_info), uses it instead
+    of making per-entry network calls.
     """
     worktree_path = Path(entry.worktree_path)
     if not worktree_path.exists():
@@ -989,49 +1080,51 @@ def get_git_status_tags(
     tags: list[str] = []
     cache_dirty = False
 
-    # Fast path: merged PR is permanent, skip all network calls
+    # Resolve PR and remote state
     if entry.merged_pr:
-        tags.append("PR merged")
+        pr_state, pr_number, has_remote = "merged", None, False
+    elif git_info is not None:
+        pr_state = git_info.pr_state
+        pr_number = git_info.pr_number
+        has_remote = git_info.has_remote
     else:
-        # Use prefetched result or fetch inline
-        if pr_status is not None:
-            pr_state, pr_number = pr_status
-        else:
-            pr_state, pr_number = git.get_pr_status(worktree_path, entry.branch)
+        # Fallback: per-entry fetch (used when called without prefetch)
+        pr_state, pr_number = git.get_pr_status(worktree_path, entry.branch)
+        has_remote = git.remote_branch_exists(worktree_path, entry.branch)
 
-        if pr_state == "merged":
-            tags.append("PR merged")
+    if pr_state == "merged":
+        tags.append("PR merged")
+        if not entry.merged_pr:
             entry.merged_pr = True
             cache_dirty = True
-        elif pr_state == "open" and pr_number is not None:
-            # Open PR implies remote exists — skip ls-remote
-            github_url = entry.github_url
-            if github_url is None:
-                github_url = _get_github_url(worktree_path)
-                if github_url:
-                    entry.github_url = github_url
-                    cache_dirty = True
+    elif pr_state == "open" and pr_number is not None:
+        github_url = entry.github_url
+        if github_url is None:
+            github_url = _get_github_url(worktree_path)
             if github_url:
-                pr_label = f"PR {_hyperlink(f'{github_url}/pull/{pr_number}', f'#{pr_number}')}"
-            else:
-                pr_label = f"PR #{pr_number}"
-            has_unpushed = git.has_unpushed_commits(worktree_path, entry.branch)
-            if has_unpushed:
-                tags.append(f"{pr_label}, unpushed commits")
-            else:
-                tags.append(pr_label)
+                entry.github_url = github_url
+                cache_dirty = True
+        if github_url:
+            pr_label = (
+                f"PR {_hyperlink(f'{github_url}/pull/{pr_number}', f'#{pr_number}')}"
+            )
         else:
-            # No PR — need to check remote and push state
-            has_remote = git.remote_branch_exists(worktree_path, entry.branch)
-            has_unpushed = git.has_unpushed_commits(worktree_path, entry.branch)
-            if has_remote and has_unpushed:
-                tags.append("unpushed commits")
-            elif has_remote:
-                tags.append("pushed")
-            elif has_unpushed:
-                tags.append("local only")
-            else:
-                tags.append("no commits")
+            pr_label = f"PR #{pr_number}"
+        has_unpushed = git.has_unpushed_commits(worktree_path, entry.branch)
+        if has_unpushed:
+            tags.append(f"{pr_label}, unpushed commits")
+        else:
+            tags.append(pr_label)
+    else:
+        has_unpushed = git.has_unpushed_commits(worktree_path, entry.branch)
+        if has_remote and has_unpushed:
+            tags.append("unpushed commits")
+        elif has_remote:
+            tags.append("pushed")
+        elif has_unpushed:
+            tags.append("local only")
+        else:
+            tags.append("no commits")
 
     # Working tree cleanliness (independent dimension, always local)
     if git.has_uncommitted_changes(worktree_path):
@@ -1088,8 +1181,8 @@ def status(
 
     git = RealGitBackend()
 
-    # Prefetch PR statuses in parallel (single network round-trip)
-    pr_statuses = prefetch_pr_statuses(entries, git)
+    # Batch-fetch all PR + remote branch info (2 network calls total)
+    git_info_map = prefetch_git_info(entries)
 
     for entry in entries:
         worktree = Path(entry.worktree_path)
@@ -1102,7 +1195,7 @@ def status(
 
         agent_status, details = check_agent_status(entry)
         git_tags = get_git_status_tags(
-            entry, git, registry=registry, pr_status=pr_statuses.get(entry.name)
+            entry, git, registry=registry, git_info=git_info_map.get(entry.name)
         )
         typer.echo(
             _format_status_line(entry.name, agent_status, details, git_tags=git_tags)
