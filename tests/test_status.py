@@ -15,6 +15,7 @@ from superintendent.cli.main import (
     app,
     check_agent_status,
     get_git_status_tags,
+    prefetch_pr_statuses,
 )
 from superintendent.state.registry import WorktreeEntry, WorktreeRegistry
 
@@ -580,6 +581,67 @@ class TestGitStatusCaching:
             mock_get_url.assert_not_called()
         expected_link = _hyperlink("https://github.com/cached/repo/pull/7", "#7")
         assert f"PR {expected_link}" in tags
+
+
+class TestPrefetchPrStatuses:
+    def test_parallel_fetch(self, tmp_path: Path):
+        wt1 = tmp_path / "wt1"
+        wt1.mkdir()
+        wt2 = tmp_path / "wt2"
+        wt2.mkdir()
+        entries = [
+            WorktreeEntry(
+                name="a", repo="/tmp/repo", branch="feat-a", worktree_path=str(wt1)
+            ),
+            WorktreeEntry(
+                name="b", repo="/tmp/repo", branch="feat-b", worktree_path=str(wt2)
+            ),
+        ]
+        git = MockGitBackend(merged_branches={"feat-a"}, open_prs={"feat-b": 42})
+        results = prefetch_pr_statuses(entries, git)
+        assert results["a"] == ("merged", None)
+        assert results["b"] == ("open", 42)
+
+    def test_cached_merged_skips_fetch(self, tmp_path: Path):
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        entries = [
+            WorktreeEntry(
+                name="cached",
+                repo="/tmp/repo",
+                branch="feat",
+                worktree_path=str(wt),
+                merged_pr=True,
+            ),
+        ]
+        git = MockGitBackend()
+        results = prefetch_pr_statuses(entries, git)
+        assert results["cached"] == ("merged", None)
+
+    def test_missing_worktree_skipped(self):
+        entries = [
+            WorktreeEntry(
+                name="gone",
+                repo="/tmp/repo",
+                branch="feat",
+                worktree_path="/nonexistent",
+            ),
+        ]
+        git = MockGitBackend()
+        results = prefetch_pr_statuses(entries, git)
+        assert "gone" not in results
+
+    def test_prefetched_result_passed_to_tags(self, tmp_path: Path):
+        """get_git_status_tags uses pr_status param instead of calling API."""
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        entry = WorktreeEntry(
+            name="test", repo="/tmp/repo", branch="feat", worktree_path=str(wt)
+        )
+        git = MockGitBackend()  # No PR data — would return "none"
+        # But we pass a prefetched result saying it's open
+        tags = get_git_status_tags(entry, git, pr_status=("open", 99))
+        assert "PR #99" in tags
 
 
 class TestFormatStatusLineWithGitTags:

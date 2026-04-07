@@ -929,10 +929,46 @@ def _hyperlink(url: str, text: str) -> str:
     return f"\033]8;;{url}\033\\{_UNDERLINE_ON}{text}{_UNDERLINE_OFF}\033]8;;\033\\"
 
 
+def prefetch_pr_statuses(
+    entries: list[WorktreeEntry],
+    git: GitBackend,
+) -> dict[str, tuple[str, int | None]]:
+    """Fetch PR statuses for all entries in parallel.
+
+    Returns a dict mapping entry name to (state, pr_number).
+    Entries with cached merged_pr are skipped (no API call needed).
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    needs_fetch: list[WorktreeEntry] = []
+    results: dict[str, tuple[str, int | None]] = {}
+
+    for entry in entries:
+        if entry.merged_pr:
+            results[entry.name] = ("merged", None)
+        elif Path(entry.worktree_path).exists():
+            needs_fetch.append(entry)
+        # Entries with missing worktree paths are skipped entirely
+
+    if not needs_fetch:
+        return results
+
+    def _fetch(entry: WorktreeEntry) -> tuple[str, tuple[str, int | None]]:
+        worktree_path = Path(entry.worktree_path)
+        return (entry.name, git.get_pr_status(worktree_path, entry.branch))
+
+    with ThreadPoolExecutor(max_workers=len(needs_fetch)) as pool:
+        for name, pr_result in pool.map(_fetch, needs_fetch):
+            results[name] = pr_result
+
+    return results
+
+
 def get_git_status_tags(
     entry: WorktreeEntry,
     git: GitBackend,
     registry: WorktreeRegistry | None = None,
+    pr_status: tuple[str, int | None] | None = None,
 ) -> list[str]:
     """Gather git-level status tags for an entry.
 
@@ -942,6 +978,9 @@ def get_git_status_tags(
     Uses cached fields on the entry when available (merged_pr, github_url)
     to avoid repeated network calls. Updates the registry when cache misses
     are resolved.
+
+    If pr_status is provided (from prefetch_pr_statuses), uses it instead
+    of making its own API call.
     """
     worktree_path = Path(entry.worktree_path)
     if not worktree_path.exists():
@@ -954,8 +993,11 @@ def get_git_status_tags(
     if entry.merged_pr:
         tags.append("PR merged")
     else:
-        # Single combined gh API call for PR state
-        pr_state, pr_number = git.get_pr_status(worktree_path, entry.branch)
+        # Use prefetched result or fetch inline
+        if pr_status is not None:
+            pr_state, pr_number = pr_status
+        else:
+            pr_state, pr_number = git.get_pr_status(worktree_path, entry.branch)
 
         if pr_state == "merged":
             tags.append("PR merged")
@@ -1046,6 +1088,9 @@ def status(
 
     git = RealGitBackend()
 
+    # Prefetch PR statuses in parallel (single network round-trip)
+    pr_statuses = prefetch_pr_statuses(entries, git)
+
     for entry in entries:
         worktree = Path(entry.worktree_path)
         if not worktree.exists():
@@ -1056,7 +1101,9 @@ def status(
             continue
 
         agent_status, details = check_agent_status(entry)
-        git_tags = get_git_status_tags(entry, git, registry=registry)
+        git_tags = get_git_status_tags(
+            entry, git, registry=registry, pr_status=pr_statuses.get(entry.name)
+        )
         typer.echo(
             _format_status_line(entry.name, agent_status, details, git_tags=git_tags)
         )
