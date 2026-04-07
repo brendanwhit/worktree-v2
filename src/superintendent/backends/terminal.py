@@ -18,6 +18,42 @@ def _escape_for_applescript(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
 
+def build_agent_command(
+    prompt: str,
+    *,
+    autonomous: bool = False,
+    sandbox_name: str | None = None,
+) -> str:
+    """Build the shell command to launch a Claude agent.
+
+    Works for both local and sandbox targets:
+    - Local: ``claude [--dangerously-skip-permissions] '<prompt>'``
+    - Sandbox: ``docker sandbox run '<name>' [--dangerously-skip-permissions] '<prompt>'``
+    """
+    escaped = prompt.replace("'", "'\\''")
+    skip = " --dangerously-skip-permissions" if autonomous else ""
+    if sandbox_name:
+        return f"docker sandbox run '{sandbox_name}' --{skip} '{escaped}'"
+    # Unset CLAUDECODE so the spawned agent doesn't inherit the parent's
+    # Claude Code session state, which causes conflicts with the new instance.
+    return f"unset CLAUDECODE && claude{skip} '{escaped}'"
+
+
+def wrap_with_lifecycle(cmd: str, ralph_dir: Path) -> str:
+    """Wrap an agent command with lifecycle marker writes.
+
+    Writes agent-started before the command, then captures the exit code
+    and writes agent-exit-code and agent-done after it completes.
+    """
+    return (
+        f"date -u +%Y-%m-%dT%H:%M:%SZ > {ralph_dir}/agent-started; "
+        f"{cmd}; "
+        f"_exit=$?; echo $_exit > {ralph_dir}/agent-exit-code; "
+        f"date -u +%Y-%m-%dT%H:%M:%SZ > {ralph_dir}/agent-done; "
+        f"exit $_exit"
+    )
+
+
 @runtime_checkable
 class TerminalBackend(Protocol):
     """Protocol for terminal spawn operations."""

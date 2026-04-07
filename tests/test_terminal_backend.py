@@ -10,7 +10,9 @@ from superintendent.backends.terminal import (
     TerminalAppBackend,
     TerminalBackend,
     WezTermBackend,
+    build_agent_command,
     detect_terminal,
+    wrap_with_lifecycle,
 )
 
 
@@ -244,3 +246,78 @@ class TestDetectTerminal:
         monkeypatch.setenv("TERM_PROGRAM", "SomeOtherTerminal")
         terminal = detect_terminal()
         assert isinstance(terminal, TerminalAppBackend)
+
+
+class TestBuildAgentCommand:
+    """Test build_agent_command() for both local and sandbox targets."""
+
+    def test_local_interactive(self):
+        cmd = build_agent_command("do something")
+        assert "claude" in cmd
+        assert "--dangerously-skip-permissions" not in cmd
+        assert "do something" in cmd
+        assert cmd.startswith("unset CLAUDECODE && claude")
+
+    def test_local_autonomous(self):
+        cmd = build_agent_command("do something", autonomous=True)
+        assert "--dangerously-skip-permissions" in cmd
+        assert "claude" in cmd
+
+    def test_sandbox_interactive(self):
+        cmd = build_agent_command("do something", sandbox_name="my-sandbox")
+        assert "docker sandbox run" in cmd
+        assert "'my-sandbox'" in cmd
+        assert "--dangerously-skip-permissions" not in cmd
+
+    def test_sandbox_autonomous(self):
+        cmd = build_agent_command(
+            "do something", sandbox_name="my-sandbox", autonomous=True
+        )
+        assert "docker sandbox run" in cmd
+        assert "--dangerously-skip-permissions" in cmd
+
+    def test_escapes_single_quotes(self):
+        cmd = build_agent_command("it's a test")
+        assert "it" in cmd
+        assert "'" not in cmd or "\\'" in cmd or "'\\''".replace("\\", "") not in cmd
+
+    def test_local_no_docker(self):
+        """Local commands must not reference docker."""
+        cmd = build_agent_command("task", autonomous=True)
+        assert "docker" not in cmd
+
+    def test_sandbox_no_unset(self):
+        """Sandbox commands should not unset CLAUDECODE."""
+        cmd = build_agent_command("task", sandbox_name="sb")
+        assert "unset CLAUDECODE" not in cmd
+
+
+class TestWrapWithLifecycle:
+    """Test wrap_with_lifecycle() marker wrapping."""
+
+    def test_wraps_command(self, tmp_path):
+        ralph_dir = tmp_path / ".ralph"
+        ralph_dir.mkdir()
+        result = wrap_with_lifecycle("my-cmd", ralph_dir)
+        assert "agent-started" in result
+        assert "agent-done" in result
+        assert "agent-exit-code" in result
+        assert "my-cmd" in result
+
+    def test_preserves_exit_code(self, tmp_path):
+        ralph_dir = tmp_path / ".ralph"
+        ralph_dir.mkdir()
+        result = wrap_with_lifecycle("my-cmd", ralph_dir)
+        assert "_exit=$?" in result
+        assert "exit $_exit" in result
+
+    def test_marker_order(self, tmp_path):
+        """Markers must be written in order: started, cmd, exit-code, done."""
+        ralph_dir = tmp_path / ".ralph"
+        ralph_dir.mkdir()
+        result = wrap_with_lifecycle("my-cmd", ralph_dir)
+        started_pos = result.index("agent-started")
+        cmd_pos = result.index("my-cmd")
+        exit_pos = result.index("agent-exit-code")
+        done_pos = result.index("agent-done")
+        assert started_pos < cmd_pos < exit_pos < done_pos
