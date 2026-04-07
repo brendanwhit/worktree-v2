@@ -470,8 +470,8 @@ class TestGetGitStatusTags:
             return_value="https://github.com/owner/repo",
         ):
             tags = get_git_status_tags(entry, git)
-        expected = _hyperlink("https://github.com/owner/repo/pull/42", "PR #42")
-        assert expected in tags
+        expected_link = _hyperlink("https://github.com/owner/repo/pull/42", "#42")
+        assert f"PR {expected_link}" in tags
 
     def test_missing_worktree_returns_empty(self):
         entry = WorktreeEntry(
@@ -488,11 +488,13 @@ class TestGetGitStatusTags:
 class TestHyperlink:
     def test_hyperlink_format(self):
         result = _hyperlink("https://example.com", "click me")
-        assert result == "\033]8;;https://example.com\033\\click me\033]8;;\033\\"
+        assert result == (
+            "\033]8;;https://example.com\033\\\033[4mclick me\033[24m\033]8;;\033\\"
+        )
 
     def test_hyperlink_contains_text(self):
-        result = _hyperlink("https://example.com", "PR #42")
-        assert "PR #42" in result
+        result = _hyperlink("https://example.com", "#42")
+        assert "#42" in result
 
 
 class TestFormatStatusLineWithGitTags:

@@ -920,9 +920,13 @@ def _get_github_url(worktree_path: Path) -> str | None:
     return None
 
 
+_UNDERLINE_ON = "\033[4m"
+_UNDERLINE_OFF = "\033[24m"
+
+
 def _hyperlink(url: str, text: str) -> str:
-    """Format text as a clickable terminal hyperlink (OSC 8)."""
-    return f"\033]8;;{url}\033\\{text}\033]8;;\033\\"
+    """Format text as a clickable, underlined terminal hyperlink (OSC 8)."""
+    return f"\033]8;;{url}\033\\{_UNDERLINE_ON}{text}{_UNDERLINE_OFF}\033]8;;\033\\"
 
 
 def get_git_status_tags(
@@ -950,7 +954,7 @@ def get_git_status_tags(
     elif open_pr:
         github_url = _get_github_url(worktree_path)
         if github_url:
-            pr_label = _hyperlink(f"{github_url}/pull/{open_pr}", f"PR #{open_pr}")
+            pr_label = f"PR {_hyperlink(f'{github_url}/pull/{open_pr}', f'#{open_pr}')}"
         else:
             pr_label = f"PR #{open_pr}"
         if has_unpushed:
