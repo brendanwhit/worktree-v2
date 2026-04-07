@@ -932,49 +932,74 @@ def _hyperlink(url: str, text: str) -> str:
 def get_git_status_tags(
     entry: WorktreeEntry,
     git: GitBackend,
+    registry: WorktreeRegistry | None = None,
 ) -> list[str]:
     """Gather git-level status tags for an entry.
 
     Returns a list of short tags like "dirty", "unpushed", "PR merged", etc.
     Returns an empty list if the worktree path doesn't exist.
+
+    Uses cached fields on the entry when available (merged_pr, github_url)
+    to avoid repeated network calls. Updates the registry when cache misses
+    are resolved.
     """
     worktree_path = Path(entry.worktree_path)
     if not worktree_path.exists():
         return []
 
     tags: list[str] = []
+    cache_dirty = False
 
-    # Remote/PR state (single mutually exclusive dimension)
-    # Priority: PR merged > PR open > pushed+ahead > pushed > local only > no commits
-    has_remote = git.remote_branch_exists(worktree_path, entry.branch)
-    has_unpushed = git.has_unpushed_commits(worktree_path, entry.branch)
-    open_pr = git.has_open_pr(worktree_path, entry.branch)
-    if git.has_merged_pr(worktree_path, entry.branch):
+    # Fast path: merged PR is permanent, skip all network calls
+    if entry.merged_pr:
         tags.append("PR merged")
-    elif open_pr:
-        github_url = _get_github_url(worktree_path)
-        if github_url:
-            pr_label = f"PR {_hyperlink(f'{github_url}/pull/{open_pr}', f'#{open_pr}')}"
-        else:
-            pr_label = f"PR #{open_pr}"
-        if has_unpushed:
-            tags.append(f"{pr_label}, unpushed commits")
-        else:
-            tags.append(pr_label)
-    elif has_remote and has_unpushed:
-        tags.append("unpushed commits")
-    elif has_remote:
-        tags.append("pushed")
-    elif has_unpushed:
-        tags.append("local only")
     else:
-        tags.append("no commits")
+        # Single combined gh API call for PR state
+        pr_state, pr_number = git.get_pr_status(worktree_path, entry.branch)
 
-    # Working tree cleanliness (independent dimension)
+        if pr_state == "merged":
+            tags.append("PR merged")
+            entry.merged_pr = True
+            cache_dirty = True
+        elif pr_state == "open" and pr_number is not None:
+            # Open PR implies remote exists — skip ls-remote
+            github_url = entry.github_url
+            if github_url is None:
+                github_url = _get_github_url(worktree_path)
+                if github_url:
+                    entry.github_url = github_url
+                    cache_dirty = True
+            if github_url:
+                pr_label = f"PR {_hyperlink(f'{github_url}/pull/{pr_number}', f'#{pr_number}')}"
+            else:
+                pr_label = f"PR #{pr_number}"
+            has_unpushed = git.has_unpushed_commits(worktree_path, entry.branch)
+            if has_unpushed:
+                tags.append(f"{pr_label}, unpushed commits")
+            else:
+                tags.append(pr_label)
+        else:
+            # No PR — need to check remote and push state
+            has_remote = git.remote_branch_exists(worktree_path, entry.branch)
+            has_unpushed = git.has_unpushed_commits(worktree_path, entry.branch)
+            if has_remote and has_unpushed:
+                tags.append("unpushed commits")
+            elif has_remote:
+                tags.append("pushed")
+            elif has_unpushed:
+                tags.append("local only")
+            else:
+                tags.append("no commits")
+
+    # Working tree cleanliness (independent dimension, always local)
     if git.has_uncommitted_changes(worktree_path):
         tags.append("dirty")
     else:
         tags.append("clean")
+
+    # Persist cache updates
+    if cache_dirty and registry is not None:
+        registry.add(entry)
 
     return tags
 
@@ -1031,7 +1056,7 @@ def status(
             continue
 
         agent_status, details = check_agent_status(entry)
-        git_tags = get_git_status_tags(entry, git)
+        git_tags = get_git_status_tags(entry, git, registry=registry)
         typer.echo(
             _format_status_line(entry.name, agent_status, details, git_tags=git_tags)
         )

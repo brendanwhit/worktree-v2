@@ -497,6 +497,91 @@ class TestHyperlink:
         assert "#42" in result
 
 
+class TestGitStatusCaching:
+    def test_merged_pr_cached_skips_network(self, tmp_path: Path):
+        """When entry.merged_pr is True, get_pr_status is never called."""
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(wt),
+            merged_pr=True,
+        )
+        # No merged_branches set — get_pr_status would return "none"
+        git = MockGitBackend()
+        tags = get_git_status_tags(entry, git)
+        assert "PR merged" in tags
+        assert "clean" in tags
+
+    def test_merged_pr_persisted_to_registry(self, tmp_path: Path):
+        """First call discovers merged PR and caches it on the registry."""
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        registry = WorktreeRegistry(tmp_path / "registry.json")
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(wt),
+        )
+        registry.add(entry)
+
+        git = MockGitBackend(merged_branches={"feat"})
+        tags = get_git_status_tags(entry, git, registry=registry)
+        assert "PR merged" in tags
+
+        # Verify the registry was updated with the cache
+        reloaded = registry.get("test")
+        assert reloaded is not None
+        assert reloaded.merged_pr is True
+
+    def test_github_url_cached_on_entry(self, tmp_path: Path):
+        """github_url is resolved once and cached on the entry."""
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        registry = WorktreeRegistry(tmp_path / "registry.json")
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(wt),
+        )
+        registry.add(entry)
+
+        git = MockGitBackend(open_prs={"feat": 10}, remote_branches={"feat"})
+        with patch(
+            "superintendent.cli.main._get_github_url",
+            return_value="https://github.com/owner/repo",
+        ):
+            get_git_status_tags(entry, git, registry=registry)
+
+        reloaded = registry.get("test")
+        assert reloaded is not None
+        assert reloaded.github_url == "https://github.com/owner/repo"
+
+    def test_cached_github_url_reused(self, tmp_path: Path):
+        """When github_url is already cached, _get_github_url is not called."""
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(wt),
+            github_url="https://github.com/cached/repo",
+        )
+        git = MockGitBackend(open_prs={"feat": 7}, remote_branches={"feat"})
+        with patch(
+            "superintendent.cli.main._get_github_url",
+        ) as mock_get_url:
+            tags = get_git_status_tags(entry, git)
+            mock_get_url.assert_not_called()
+        expected_link = _hyperlink("https://github.com/cached/repo/pull/7", "#7")
+        assert f"PR {expected_link}" in tags
+
+
 class TestFormatStatusLineWithGitTags:
     def test_git_tags_appended(self):
         line = _format_status_line(

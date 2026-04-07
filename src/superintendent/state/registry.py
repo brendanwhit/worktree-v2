@@ -21,9 +21,12 @@ class WorktreeEntry:
     worktree_path: str
     sandbox_name: str | None = None
     created_at: str = field(default_factory=_now_iso)
+    # Cached fields (populated lazily, persisted to avoid repeat network calls)
+    github_url: str | None = None
+    merged_pr: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "name": self.name,
             "repo": self.repo,
             "branch": self.branch,
@@ -31,6 +34,11 @@ class WorktreeEntry:
             "sandbox_name": self.sandbox_name,
             "created_at": self.created_at,
         }
+        if self.github_url is not None:
+            d["github_url"] = self.github_url
+        if self.merged_pr:
+            d["merged_pr"] = self.merged_pr
+        return d
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "WorktreeEntry":
@@ -41,6 +49,8 @@ class WorktreeEntry:
             worktree_path=data["worktree_path"],
             sandbox_name=data.get("sandbox_name"),
             created_at=data.get("created_at", _now_iso()),
+            github_url=data.get("github_url"),
+            merged_pr=data.get("merged_pr", False),
         )
 
 
