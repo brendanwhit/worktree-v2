@@ -1048,6 +1048,87 @@ class TestStartAgentHandler:
         cmd, _ = terminal.spawned[0]
         assert "claude '" in cmd
 
+    def test_local_autonomous_includes_skip_permissions(self, tmp_path):
+        """Autonomous local agents MUST include --dangerously-skip-permissions."""
+        terminal = MockTerminalBackend()
+        ctx = ExecutionContext(backends=_mock_backends(terminal=terminal))
+        ctx.step_outputs["create_worktree"] = {"worktree_path": str(tmp_path)}
+        handler = RealStepHandler(ctx)
+
+        step = WorkflowStep(
+            id="start_agent",
+            action="start_agent",
+            params={"task": "do stuff", "mode": "autonomous"},
+            depends_on=["initialize_state"],
+        )
+        result = handler.execute(step)
+
+        assert result.success is True
+        cmd, _ = terminal.spawned[0]
+        assert "--dangerously-skip-permissions" in cmd
+
+    def test_local_interactive_excludes_skip_permissions(self, tmp_path):
+        """Interactive local agents must NOT include --dangerously-skip-permissions."""
+        terminal = MockTerminalBackend()
+        ctx = ExecutionContext(backends=_mock_backends(terminal=terminal))
+        ctx.step_outputs["create_worktree"] = {"worktree_path": str(tmp_path)}
+        handler = RealStepHandler(ctx)
+
+        step = WorkflowStep(
+            id="start_agent",
+            action="start_agent",
+            params={"task": "do stuff", "mode": "interactive"},
+            depends_on=["initialize_state"],
+        )
+        result = handler.execute(step)
+
+        assert result.success is True
+        cmd, _ = terminal.spawned[0]
+        assert "--dangerously-skip-permissions" not in cmd
+
+    def test_local_agent_writes_lifecycle_markers(self, tmp_path):
+        """Local agents with .ralph/ dir get lifecycle marker wrapping."""
+        ralph_dir = tmp_path / ".ralph"
+        ralph_dir.mkdir()
+
+        terminal = MockTerminalBackend()
+        ctx = ExecutionContext(backends=_mock_backends(terminal=terminal))
+        ctx.step_outputs["create_worktree"] = {"worktree_path": str(tmp_path)}
+        handler = RealStepHandler(ctx)
+
+        step = WorkflowStep(
+            id="start_agent",
+            action="start_agent",
+            params={"task": "do stuff"},
+            depends_on=["initialize_state"],
+        )
+        result = handler.execute(step)
+
+        assert result.success is True
+        cmd, _ = terminal.spawned[0]
+        assert "agent-started" in cmd
+        assert "agent-done" in cmd
+        assert "agent-exit-code" in cmd
+
+    def test_local_agent_no_markers_without_ralph(self, tmp_path):
+        """Local agents without .ralph/ dir skip lifecycle wrapping."""
+        terminal = MockTerminalBackend()
+        ctx = ExecutionContext(backends=_mock_backends(terminal=terminal))
+        ctx.step_outputs["create_worktree"] = {"worktree_path": str(tmp_path)}
+        handler = RealStepHandler(ctx)
+
+        step = WorkflowStep(
+            id="start_agent",
+            action="start_agent",
+            params={"task": "do stuff"},
+            depends_on=["initialize_state"],
+        )
+        result = handler.execute(step)
+
+        assert result.success is True
+        cmd, _ = terminal.spawned[0]
+        assert "agent-started" not in cmd
+
     def test_sandbox_agent_failure(self, tmp_path):
         """When docker.run_agent fails, return failure."""
         docker = MockDockerBackend(fail_on="run_agent")

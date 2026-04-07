@@ -642,6 +642,68 @@ class TestRealGitBackend:
         assert result is True
         assert wt_path.exists()
 
+    @pytest.mark.integration
+    def test_create_worktree_succeeds_despite_failing_post_checkout_hook(
+        self, tmp_path
+    ):
+        """Worktree creation should succeed even when post-checkout hook fails.
+
+        This reproduces the bug where beads' post-checkout hook could fail
+        (e.g. Dolt database mismatch), causing git worktree add to return
+        non-zero even though the worktree was successfully created.
+        """
+        import subprocess
+
+        repo_path = tmp_path / "repo"
+        subprocess.run(["git", "init", str(repo_path)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(repo_path), "config", "user.email", "test@test.com"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_path), "config", "user.name", "Test"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_path), "commit", "--allow-empty", "-m", "init"],
+            check=True,
+            capture_output=True,
+        )
+
+        # Install a post-checkout hook that always fails (simulates beads hook failure)
+        hooks_dir = repo_path / ".git" / "hooks"
+        hooks_dir.mkdir(exist_ok=True)
+        post_checkout = hooks_dir / "post-checkout"
+        post_checkout.write_text("#!/bin/sh\nexit 1\n")
+        post_checkout.chmod(0o755)
+
+        backend = RealGitBackend()
+
+        # create_worktree (new branch) should succeed despite hook failure
+        wt_path = tmp_path / "wt-new"
+        result = backend.create_worktree(repo_path, "new-branch", wt_path)
+        assert result is True, (
+            "create_worktree should bypass post-checkout hook failures"
+        )
+        assert wt_path.exists()
+
+        # create_worktree_from_existing should also succeed
+        subprocess.run(
+            ["git", "-C", str(repo_path), "branch", "existing-branch"],
+            check=True,
+            capture_output=True,
+        )
+        wt_path2 = tmp_path / "wt-existing"
+        result2 = backend.create_worktree_from_existing(
+            repo_path, "existing-branch", wt_path2
+        )
+        assert result2 is True, (
+            "create_worktree_from_existing should bypass post-checkout hook failures"
+        )
+        assert wt_path2.exists()
+
 
 class TestHelperFunctions:
     """Test helper functions used by RealGitBackend."""
