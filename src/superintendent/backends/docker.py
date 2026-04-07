@@ -5,7 +5,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from superintendent.backends.terminal import detect_terminal
+from superintendent.backends.terminal import (
+    build_agent_command,
+    detect_terminal,
+    wrap_with_lifecycle,
+)
 
 
 @runtime_checkable
@@ -143,24 +147,18 @@ class RealDockerBackend:
     def run_agent(
         self, name: str, prompt: str, autonomous: bool = False, cwd: Path | None = None
     ) -> bool:
-        escaped_prompt = prompt.replace("'", "'\\''")
-        skip = " --dangerously-skip-permissions" if autonomous else ""
-        agent_cmd = f"docker sandbox run '{name}' --{skip} '{escaped_prompt}'"
+        agent_cmd = build_agent_command(
+            prompt, autonomous=autonomous, sandbox_name=name
+        )
         terminal = detect_terminal()
         workspace = cwd or Path.cwd()
 
-        # Wrap with lifecycle markers if .ralph/ exists
         ralph_dir = workspace / ".ralph"
-        if ralph_dir.is_dir():
-            shell_cmd = (
-                f"date -u +%Y-%m-%dT%H:%M:%SZ > {ralph_dir}/agent-started; "
-                f"{agent_cmd}; "
-                f"_exit=$?; echo $_exit > {ralph_dir}/agent-exit-code; "
-                f"date -u +%Y-%m-%dT%H:%M:%SZ > {ralph_dir}/agent-done; "
-                f"exit $_exit"
-            )
-        else:
-            shell_cmd = agent_cmd
+        shell_cmd = (
+            wrap_with_lifecycle(agent_cmd, ralph_dir)
+            if ralph_dir.is_dir()
+            else agent_cmd
+        )
 
         return terminal.spawn(shell_cmd, workspace)
 
@@ -404,18 +402,12 @@ class DryRunDockerBackend:
         autonomous: bool = False,
         cwd: Path | None = None,
     ) -> bool:
-        skip = " --dangerously-skip-permissions" if autonomous else ""
-        agent_cmd = f"docker sandbox run {name} --{skip} '{prompt}'"
-        # Show lifecycle wrapper — in real mode this writes markers to .ralph/
+        agent_cmd = build_agent_command(
+            prompt, autonomous=autonomous, sandbox_name=name
+        )
         workspace = cwd or Path(".")
         ralph_dir = workspace / ".ralph"
-        cmd = (
-            f"date -u +%Y-%m-%dT%H:%M:%SZ > {ralph_dir}/agent-started; "
-            f"{agent_cmd}; "
-            f"_exit=$?; echo $_exit > {ralph_dir}/agent-exit-code; "
-            f"date -u +%Y-%m-%dT%H:%M:%SZ > {ralph_dir}/agent-done; "
-            f"exit $_exit"
-        )
+        cmd = wrap_with_lifecycle(agent_cmd, ralph_dir)
         if cwd:
             cmd += f"  # cwd={cwd}"
         self.commands.append(cmd)
