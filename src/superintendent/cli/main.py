@@ -499,6 +499,33 @@ def run(
             typer.echo(f"Failed at step: {result.failed_step}", err=True)
         raise typer.Exit(code=1)
 
+    # Register the entry in the worktree registry
+    registry = get_default_registry()
+    worktree_path = context.step_outputs.get("create_worktree", {}).get(
+        "worktree_path", ""
+    )
+    branch_name = plan.metadata.get("branch", "")
+    repo_name = plan.metadata.get("repo_name", _extract_repo_name(repo))
+    name = _branch_to_slug(branch_name) if branch_name else repo_name
+
+    # Only set sandbox_name for sandbox/container targets
+    target_val = plan.metadata.get("target")
+    if target_val == "sandbox":
+        env_name = plan.metadata.get("sandbox_name")
+    elif target_val == "container":
+        env_name = plan.metadata.get("container_name")
+    else:
+        env_name = None
+
+    entry = WorktreeEntry(
+        name=name,
+        repo=repo,
+        branch=branch_name,
+        worktree_path=worktree_path,
+        sandbox_name=env_name,
+    )
+    registry.add(entry)
+
     if verbosity != Verbosity.quiet:
         typer.echo(f"Agent spawned for {plan.metadata.get('repo_name', repo)}.")
         env = plan.metadata.get("sandbox_name") or plan.metadata.get("container_name")
@@ -815,6 +842,18 @@ def _time_ago(iso_timestamp: str) -> str:
         return iso_timestamp
 
 
+def _is_sandbox_alive(sandbox_name: str) -> bool:
+    """Check if a sandbox is still listed by Docker."""
+    result = subprocess.run(
+        ["docker", "sandbox", "ls", "-q"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return False
+    return sandbox_name in result.stdout.splitlines()
+
+
 def check_agent_status(entry: WorktreeEntry) -> tuple[str, dict[str, str]]:
     """Determine agent state from .ralph/ markers.
 
@@ -855,13 +894,16 @@ def check_agent_status(entry: WorktreeEntry) -> tuple[str, dict[str, str]]:
         return ("failed", details)
 
     # Started but not done — agent is still running (or was killed)
+    if entry.sandbox_name and not _is_sandbox_alive(entry.sandbox_name):
+        return ("sandbox_stopped", details)
+
     return ("running", details)
 
 
 def _format_status_line(name: str, status: str, details: dict[str, str]) -> str:
     """Format a single status line for display."""
     info_parts: list[str] = []
-    if status == "running" and "start_time" in details:
+    if status in ("running", "sandbox_stopped") and "start_time" in details:
         info_parts.append(f"started {_time_ago(details['start_time'])}")
     elif status in ("completed", "failed"):
         if "exit_code" in details:
@@ -895,7 +937,10 @@ def status(
     for entry in entries:
         worktree = Path(entry.worktree_path)
         if not worktree.exists():
-            typer.echo(f"{entry.name}:  no sandbox")
+            if entry.sandbox_name:
+                typer.echo(f"{entry.name}:  worktree removed")
+            else:
+                typer.echo(f"{entry.name}:  worktree missing")
             continue
 
         agent_status, details = check_agent_status(entry)
