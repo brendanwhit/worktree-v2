@@ -925,7 +925,14 @@ _UNDERLINE_OFF = "\033[24m"
 
 
 def _hyperlink(url: str, text: str) -> str:
-    """Format text as a clickable, underlined terminal hyperlink (OSC 8)."""
+    """Format text as a clickable, underlined terminal hyperlink (OSC 8).
+
+    Falls back to plain text when stdout is not a TTY (piped, redirected).
+    """
+    import sys
+
+    if not sys.stdout.isatty():
+        return text
     return f"\033]8;;{url}\033\\{_UNDERLINE_ON}{text}{_UNDERLINE_OFF}\033]8;;\033\\"
 
 

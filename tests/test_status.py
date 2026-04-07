@@ -453,7 +453,7 @@ class TestGetGitStatusTags:
         tags = get_git_status_tags(entry, git)
         assert "PR #17, unpushed commits" in tags
 
-    def test_open_pr_with_hyperlink(self, tmp_path: Path):
+    def test_open_pr_with_hyperlink_tty(self, tmp_path: Path):
         wt = tmp_path / "wt"
         wt.mkdir()
         entry = WorktreeEntry(
@@ -466,13 +466,19 @@ class TestGetGitStatusTags:
             open_prs={"feat": 42},
             remote_branches={"feat"},
         )
-        with patch(
-            "superintendent.cli.main._get_github_url",
-            return_value="https://github.com/owner/repo",
+        with (
+            patch(
+                "superintendent.cli.main._get_github_url",
+                return_value="https://github.com/owner/repo",
+            ),
+            patch("sys.stdout") as mock_stdout,
         ):
+            mock_stdout.isatty.return_value = True
             tags = get_git_status_tags(entry, git)
-        expected_link = _hyperlink("https://github.com/owner/repo/pull/42", "#42")
-        assert f"PR {expected_link}" in tags
+            # Verify the tag contains OSC 8 escape sequences
+            pr_tag = [t for t in tags if "PR" in t][0]
+            assert "\033]8;;" in pr_tag
+            assert "#42" in pr_tag
 
     def test_missing_worktree_returns_empty(self):
         entry = WorktreeEntry(
@@ -487,14 +493,24 @@ class TestGetGitStatusTags:
 
 
 class TestHyperlink:
-    def test_hyperlink_format(self):
-        result = _hyperlink("https://example.com", "click me")
+    def test_hyperlink_format_tty(self):
+        with patch("sys.stdout") as mock_stdout:
+            mock_stdout.isatty.return_value = True
+            result = _hyperlink("https://example.com", "click me")
         assert result == (
             "\033]8;;https://example.com\033\\\033[4mclick me\033[24m\033]8;;\033\\"
         )
 
+    def test_hyperlink_plain_when_not_tty(self):
+        with patch("sys.stdout") as mock_stdout:
+            mock_stdout.isatty.return_value = False
+            result = _hyperlink("https://example.com", "#42")
+        assert result == "#42"
+
     def test_hyperlink_contains_text(self):
-        result = _hyperlink("https://example.com", "#42")
+        with patch("sys.stdout") as mock_stdout:
+            mock_stdout.isatty.return_value = True
+            result = _hyperlink("https://example.com", "#42")
         assert "#42" in result
 
 
@@ -579,8 +595,9 @@ class TestGitStatusCaching:
         ) as mock_get_url:
             tags = get_git_status_tags(entry, git)
             mock_get_url.assert_not_called()
-        expected_link = _hyperlink("https://github.com/cached/repo/pull/7", "#7")
-        assert f"PR {expected_link}" in tags
+        # PR tag should contain #7 (hyperlink formatting depends on TTY)
+        pr_tag = [t for t in tags if "PR" in t][0]
+        assert "#7" in pr_tag
 
 
 class TestEntryGitInfoPassthrough:
