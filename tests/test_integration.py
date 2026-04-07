@@ -6,6 +6,8 @@ state transitions happen correctly.
 """
 
 from pathlib import Path
+from typing import Any
+from unittest.mock import patch
 
 from superintendent.backends.auth import MockAuthBackend
 from superintendent.backends.docker import MockDockerBackend
@@ -1082,3 +1084,176 @@ class TestRegistrationIntegration:
         entries = registry.list_all()
         assert len(entries) == 1
         assert entries[0].sandbox_name == "my-custom"
+
+
+class TestCLIRunRegistration:
+    """Tests that CLI run() actually registers entries via the real pipeline.
+
+    Unlike TestRegistrationIntegration (which re-implements the CLI's
+    registration logic), these tests exercise the actual run() function
+    through CliRunner with real Planner, Executor, and StepHandler — only
+    backends are mocked.  This catches gaps where the CLI's registration
+    code depends on step_outputs or plan metadata that mocks wouldn't
+    populate.
+    """
+
+    def _invoke_run(
+        self,
+        tmp_path: Path,
+        target: str = "sandbox",
+        extra_args: list[str] | None = None,
+    ) -> tuple["WorktreeRegistry", "Any"]:
+        from typer.testing import CliRunner
+
+        from superintendent.cli.main import app
+
+        repo_path = tmp_path / "my-repo"
+        git = MockGitBackend(local_repos={str(repo_path): repo_path})
+        docker = MockDockerBackend()
+        auth = MockAuthBackend()
+        terminal = MockTerminalBackend()
+        backends = Backends(docker=docker, git=git, terminal=terminal, auth=auth)
+
+        registry = WorktreeRegistry(tmp_path / "test-registry.json")
+        token_store = TokenStore(path=tmp_path / "test-tokens.json")
+        token_store.add("_default", "ghp_test_token", github_user="testuser")
+
+        cli_runner = CliRunner()
+
+        args = [
+            "run",
+            "autonomous",
+            target,
+            "--repo",
+            str(repo_path),
+            "--task",
+            "fix bug",
+        ]
+        if extra_args:
+            args.extend(extra_args)
+
+        with (
+            patch(
+                "superintendent.cli.main.create_backends",
+                return_value=backends,
+            ),
+            patch(
+                "superintendent.cli.main.get_default_registry",
+                return_value=registry,
+            ),
+            patch(
+                "superintendent.orchestrator.step_handler.TokenStore",
+                return_value=token_store,
+            ),
+        ):
+            result = cli_runner.invoke(app, args)
+        return registry, result
+
+    def test_sandbox_run_creates_registry_entry(self, tmp_path: Path) -> None:
+        """A successful sandbox run creates a registry entry on disk."""
+        registry, result = self._invoke_run(tmp_path, target="sandbox")
+
+        assert result.exit_code == 0, f"CLI failed: {result.output}"
+        entries = registry.list_all()
+        assert len(entries) == 1
+        entry = entries[0]
+        assert entry.repo == str(tmp_path / "my-repo")
+        assert entry.branch != ""
+        assert entry.sandbox_name is not None
+        assert entry.sandbox_name.startswith("claude-")
+        # Registry file was persisted to disk
+        assert (tmp_path / "test-registry.json").exists()
+
+    def test_local_run_creates_registry_entry(self, tmp_path: Path) -> None:
+        """A successful local run creates a registry entry without sandbox_name."""
+        registry, result = self._invoke_run(
+            tmp_path,
+            target="local",
+            extra_args=["--dangerously-skip-isolation"],
+        )
+
+        assert result.exit_code == 0, f"CLI failed: {result.output}"
+        entries = registry.list_all()
+        assert len(entries) == 1
+        entry = entries[0]
+        assert entry.repo == str(tmp_path / "my-repo")
+        assert entry.branch != ""
+        assert entry.sandbox_name is None
+
+    def test_container_run_creates_registry_entry(self, tmp_path: Path) -> None:
+        """A successful container run creates a registry entry with container name."""
+        registry, result = self._invoke_run(tmp_path, target="container")
+
+        assert result.exit_code == 0, f"CLI failed: {result.output}"
+        entries = registry.list_all()
+        assert len(entries) == 1
+        entry = entries[0]
+        assert entry.sandbox_name is not None
+        assert entry.sandbox_name.startswith("claude-")
+
+    def test_failed_run_does_not_register(self, tmp_path: Path) -> None:
+        """When execution fails, no registry entry is created."""
+        from typer.testing import CliRunner
+
+        from superintendent.cli.main import app
+
+        # Use a nonexistent repo path with no local_repos mapping -> validate_repo fails
+        git = MockGitBackend()
+        docker = MockDockerBackend()
+        auth = MockAuthBackend()
+        terminal = MockTerminalBackend()
+        backends_obj = Backends(docker=docker, git=git, terminal=terminal, auth=auth)
+
+        registry = WorktreeRegistry(tmp_path / "test-registry.json")
+        cli_runner = CliRunner()
+
+        with (
+            patch(
+                "superintendent.cli.main.create_backends",
+                return_value=backends_obj,
+            ),
+            patch(
+                "superintendent.cli.main.get_default_registry",
+                return_value=registry,
+            ),
+        ):
+            result = cli_runner.invoke(
+                app,
+                [
+                    "run",
+                    "autonomous",
+                    "sandbox",
+                    "--repo",
+                    "/nonexistent/repo",
+                    "--task",
+                    "fix bug",
+                ],
+            )
+
+        assert result.exit_code != 0
+        entries = registry.list_all()
+        assert len(entries) == 0
+
+    def test_registry_entry_worktree_path_populated(self, tmp_path: Path) -> None:
+        """Registry entry has a non-empty worktree_path from step_outputs."""
+        registry, result = self._invoke_run(tmp_path, target="sandbox")
+
+        assert result.exit_code == 0, f"CLI failed: {result.output}"
+        entries = registry.list_all()
+        assert len(entries) == 1
+        # worktree_path must be a real path populated by the step handler,
+        # not an empty string from missing step_outputs
+        assert entries[0].worktree_path != ""
+
+    def test_custom_sandbox_name_preserved_through_cli(self, tmp_path: Path) -> None:
+        """A custom --sandbox-name flows through the full pipeline to the registry."""
+        registry, result = self._invoke_run(
+            tmp_path,
+            target="sandbox",
+            extra_args=["--sandbox-name", "my-custom-sb"],
+        )
+
+        assert result.exit_code == 0, f"CLI failed: {result.output}"
+        entries = registry.list_all()
+        assert len(entries) == 1
+        assert entries[0].sandbox_name == "my-custom-sb"
