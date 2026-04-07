@@ -81,10 +81,12 @@ If the agent doesn't write the file, `superintendent respond` still works — it
 ### Signature
 
 ```
-superintendent respond <identifier> [--mode interactive|autonomous] [--dry-run] [--dangerously-skip-isolation]
+superintendent respond <identifier> [--autonomous] [--dry-run] [--dangerously-skip-isolation]
 ```
 
-Default mode is `interactive`. `--dangerously-skip-isolation` required for `autonomous` (same pattern as `run`). `--dry-run` shows the constructed prompt and spawn command without executing.
+- `identifier` is a positional Typer Argument — registry name, branch name, or PR URL
+- `--autonomous` flag (default False) — runs without permission prompts. Requires `--dangerously-skip-isolation` (same guard as `run`)
+- `--dry-run` — shows the constructed prompt and spawn command without executing
 
 ### Why `respond` bypasses the Executor/StepHandler pipeline
 
@@ -124,7 +126,12 @@ If no entry is found after all three attempts, error with a helpful message list
 
    After addressing all comments, push your changes.
    ```
-6. For autonomous mode, apply `_enrich_prompt()` to add the standard safeguards (run tests, CI checklist, etc.) that autonomous agents normally get via the `run` path. Extract `_enrich_prompt()` into a shared utility importable from both step_handler.py and cli/main.py.
+6. For autonomous mode, apply `enrich_prompt()` to add the standard safeguards (run tests, CI checklist, etc.) that autonomous agents normally get via the `run` path. Extract from `RealStepHandler._enrich_prompt()` into a standalone function in step_handler.py:
+   ```python
+   def enrich_prompt(task: str, autonomous: bool, *, notify_installed: bool = False, include_pr_context_instruction: bool = True) -> str:
+   ```
+   - `notify_installed`: the current method calls `self._notify_plugin_installed()` which checks if the notify plugin exists at `~/.claude/plugins/...`. The extracted function accepts this as a bool so callers can compute it themselves or pass False.
+   - `include_pr_context_instruction`: when True (default), appends the "write pr-context.md" instruction. The `respond` command passes `include_pr_context_instruction=False` since the agent is updating an existing PR, not creating a new one.
 7. Build agent command via `build_agent_command()` (shared helper in terminal.py)
 8. Wrap with lifecycle markers via `wrap_with_lifecycle()` if `.superintendent/` exists
 9. Spawn agent:
