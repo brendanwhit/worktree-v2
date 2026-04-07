@@ -182,7 +182,24 @@ class RealGitBackend:
             capture_output=True,
             text=True,
         )
-        return result.returncode == 0
+        if result.returncode == 0:
+            return True
+        # Worktree may have been created despite post-checkout hook failure.
+        # Verify by checking git's worktree registry rather than filesystem state.
+        return self._worktree_exists(repo, target)
+
+    def _worktree_exists(self, repo: Path, target: Path) -> bool:
+        """Check if a worktree path is registered in git's worktree list."""
+        check = subprocess.run(
+            ["git", "-C", str(repo), "worktree", "list", "--porcelain"],
+            capture_output=True,
+            text=True,
+        )
+        resolved = str(target.resolve())
+        for line in check.stdout.splitlines():
+            if line.startswith("worktree ") and line.split(" ", 1)[1] == resolved:
+                return True
+        return False
 
     def fetch(self, repo: Path) -> bool:
         result = subprocess.run(
@@ -277,7 +294,11 @@ class RealGitBackend:
             capture_output=True,
             text=True,
         )
-        return result.returncode == 0
+        if result.returncode == 0:
+            return True
+        # Worktree may have been created despite post-checkout hook failure.
+        # Verify by checking git's worktree registry rather than filesystem state.
+        return self._worktree_exists(repo, target)
 
     def get_branch_age_days(self, repo: Path, branch: str) -> float | None:
         result = subprocess.run(
