@@ -900,7 +900,48 @@ def check_agent_status(entry: WorktreeEntry) -> tuple[str, dict[str, str]]:
     return ("running", details)
 
 
-def _format_status_line(name: str, status: str, details: dict[str, str]) -> str:
+def get_git_status_tags(
+    entry: WorktreeEntry,
+    git: GitBackend,
+) -> list[str]:
+    """Gather git-level status tags for an entry.
+
+    Returns a list of short tags like "dirty", "unpushed", "PR merged", etc.
+    Returns an empty list if the worktree path doesn't exist.
+    """
+    worktree_path = Path(entry.worktree_path)
+    if not worktree_path.exists():
+        return []
+
+    tags: list[str] = []
+
+    # PR status
+    if git.has_merged_pr(worktree_path, entry.branch):
+        tags.append("PR merged")
+    elif git.remote_branch_exists(worktree_path, entry.branch):
+        tags.append("pushed")
+    else:
+        tags.append("no remote")
+
+    # Working tree cleanliness
+    if git.has_uncommitted_changes(worktree_path):
+        tags.append("dirty")
+    else:
+        tags.append("clean")
+
+    # Unpushed commits
+    if git.has_unpushed_commits(worktree_path, entry.branch):
+        tags.append("unpushed")
+
+    return tags
+
+
+def _format_status_line(
+    name: str,
+    status: str,
+    details: dict[str, str],
+    git_tags: list[str] | None = None,
+) -> str:
     """Format a single status line for display."""
     info_parts: list[str] = []
     if status in ("running", "sandbox_stopped") and "start_time" in details:
@@ -913,7 +954,8 @@ def _format_status_line(name: str, status: str, details: dict[str, str]) -> str:
         if "end_time" in details:
             info_parts.append(f"ended {_time_ago(details['end_time'])}")
     info = f"  ({', '.join(info_parts)})" if info_parts else ""
-    return f"{name}:  {status}{info}"
+    git_info = f"  [{', '.join(git_tags)}]" if git_tags else ""
+    return f"{name}:  {status}{info}{git_info}"
 
 
 @app.command()
@@ -934,6 +976,8 @@ def status(
             typer.echo(f"No entry found with name '{name}'", err=True)
             raise typer.Exit(code=1)
 
+    git = RealGitBackend()
+
     for entry in entries:
         worktree = Path(entry.worktree_path)
         if not worktree.exists():
@@ -944,7 +988,10 @@ def status(
             continue
 
         agent_status, details = check_agent_status(entry)
-        typer.echo(_format_status_line(entry.name, agent_status, details))
+        git_tags = get_git_status_tags(entry, git)
+        typer.echo(
+            _format_status_line(entry.name, agent_status, details, git_tags=git_tags)
+        )
 
 
 if __name__ == "__main__":

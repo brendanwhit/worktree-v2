@@ -6,12 +6,14 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
+from superintendent.backends.git import MockGitBackend
 from superintendent.cli.main import (
     _format_duration,
     _format_status_line,
     _is_sandbox_alive,
     app,
     check_agent_status,
+    get_git_status_tags,
 )
 from superintendent.state.registry import WorktreeEntry, WorktreeRegistry
 
@@ -338,6 +340,161 @@ class TestFormatStatusLineSandboxStopped:
     def test_sandbox_stopped_no_details(self):
         line = _format_status_line("my-entry", "sandbox_stopped", {})
         assert "sandbox_stopped" in line
+
+
+class TestGetGitStatusTags:
+    def test_merged_pr_clean(self, tmp_path: Path):
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(wt),
+        )
+        git = MockGitBackend(merged_branches={"feat"}, remote_branches={"feat"})
+        tags = get_git_status_tags(entry, git)
+        assert "PR merged" in tags
+        assert "clean" in tags
+        assert "unpushed" not in tags
+
+    def test_pushed_dirty_unpushed(self, tmp_path: Path):
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(wt),
+        )
+        git = MockGitBackend(
+            remote_branches={"feat"},
+            dirty_worktrees={str(wt)},
+            unpushed_branches={"feat"},
+        )
+        tags = get_git_status_tags(entry, git)
+        assert "pushed" in tags
+        assert "dirty" in tags
+        assert "unpushed" in tags
+
+    def test_no_remote_clean(self, tmp_path: Path):
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(wt),
+        )
+        git = MockGitBackend(remote_branches=set())
+        tags = get_git_status_tags(entry, git)
+        assert "no remote" in tags
+        assert "clean" in tags
+
+    def test_missing_worktree_returns_empty(self):
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path="/nonexistent/path",
+        )
+        git = MockGitBackend()
+        tags = get_git_status_tags(entry, git)
+        assert tags == []
+
+
+class TestFormatStatusLineWithGitTags:
+    def test_git_tags_appended(self):
+        line = _format_status_line(
+            "my-entry", "completed", {"exit_code": "0"}, git_tags=["PR merged", "clean"]
+        )
+        assert "[PR merged, clean]" in line
+        assert "exit 0" in line
+
+    def test_no_git_tags(self):
+        line = _format_status_line(
+            "my-entry", "running", {"start_time": "2026-03-23T10:00:00Z"}
+        )
+        assert "[" not in line
+
+    def test_empty_git_tags(self):
+        line = _format_status_line("my-entry", "running", {}, git_tags=[])
+        assert "[" not in line
+
+
+class TestStatusCommandWithGitInfo:
+    @patch("superintendent.cli.main.get_git_status_tags")
+    @patch("superintendent.cli.main.check_agent_status")
+    @patch("superintendent.cli.main.get_default_registry")
+    def test_status_shows_git_tags(
+        self, mock_registry, mock_status, mock_git_tags, tmp_path: Path
+    ):
+        entry = WorktreeEntry(
+            name="my-agent",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(tmp_path),
+        )
+        mock_registry.return_value.list_all.return_value = [entry]
+        mock_status.return_value = ("completed", {"exit_code": "0", "duration": "2m"})
+        mock_git_tags.return_value = ["PR merged", "clean"]
+        result = runner.invoke(app, ["status"])
+        assert result.exit_code == 0
+        assert "PR merged" in result.output
+        assert "clean" in result.output
+
+    @patch("superintendent.cli.main.get_default_registry")
+    def test_status_missing_worktree_no_git_tags(self, mock_registry):
+        entry = WorktreeEntry(
+            name="gone",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path="/nonexistent/path",
+        )
+        mock_registry.return_value.list_all.return_value = [entry]
+        result = runner.invoke(app, ["status"])
+        assert result.exit_code == 0
+        assert "worktree missing" in result.output
+        assert "[" not in result.output
+
+
+class TestRoundTripWithGitInfo:
+    def test_register_markers_and_git_status(self, tmp_path: Path):
+        """Round-trip: register entry, write markers, check status includes lifecycle AND git info."""
+        worktree_dir = tmp_path / "worktree"
+        worktree_dir.mkdir()
+        ralph = worktree_dir / ".ralph"
+        ralph.mkdir()
+        (ralph / "agent-started").write_text("2026-03-23T10:00:00Z\n")
+        (ralph / "agent-done").write_text("2026-03-23T10:30:00Z\n")
+        (ralph / "agent-exit-code").write_text("0\n")
+
+        registry = WorktreeRegistry(tmp_path / "registry.json")
+        entry = WorktreeEntry(
+            name="agent",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(worktree_dir),
+        )
+        registry.add(entry)
+
+        entries = registry.list_all()
+        status, details = check_agent_status(entries[0])
+        assert status == "completed"
+        assert details["exit_code"] == "0"
+
+        git = MockGitBackend(
+            merged_branches={"feat"},
+            remote_branches={"feat"},
+        )
+        tags = get_git_status_tags(entries[0], git)
+        assert "PR merged" in tags
+        assert "clean" in tags
+
+        line = _format_status_line(entries[0].name, status, details, git_tags=tags)
+        assert "completed" in line
+        assert "exit 0" in line
+        assert "[PR merged, clean]" in line
 
 
 class TestRoundTrip:
