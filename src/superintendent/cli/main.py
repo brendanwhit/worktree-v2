@@ -938,123 +938,6 @@ class EntryGitInfo:
     has_remote: bool = False
 
 
-def prefetch_git_info(
-    entries: list[WorktreeEntry],
-    repo_path: Path | None = None,
-) -> dict[str, EntryGitInfo]:
-    """Batch-fetch PR and remote branch info for all entries.
-
-    Makes exactly two network calls total (not per-entry):
-    1. gh pr list --state all (all PRs for the repo)
-    2. git ls-remote --heads (all remote branches)
-
-    Then matches results to entries by branch name.
-    Entries with cached merged_pr skip the PR lookup.
-    """
-    from concurrent.futures import ThreadPoolExecutor
-
-    results: dict[str, EntryGitInfo] = {}
-
-    # Find a valid worktree path to run repo-level commands from
-    if repo_path is None:
-        for entry in entries:
-            if Path(entry.worktree_path).exists():
-                repo_path = Path(entry.worktree_path)
-                break
-    if repo_path is None:
-        return results
-
-    # Collect branches we need to look up
-    branch_to_entries: dict[str, list[WorktreeEntry]] = {}
-    for entry in entries:
-        if entry.merged_pr:
-            results[entry.name] = EntryGitInfo(pr_state="merged")
-        elif Path(entry.worktree_path).exists():
-            branch_to_entries.setdefault(entry.branch, []).append(entry)
-
-    if not branch_to_entries:
-        return results
-
-    # Two network calls in parallel: PRs + remote branches
-    def _fetch_prs() -> dict[str, tuple[str, int]]:
-        """Returns branch -> (state, number) for all PRs."""
-        result = subprocess.run(
-            [
-                "gh",
-                "pr",
-                "list",
-                "--state",
-                "all",
-                "--json",
-                "number,state,headRefName",
-                "--limit",
-                "100",
-            ],
-            capture_output=True,
-            text=True,
-            cwd=str(repo_path),
-        )
-        if result.returncode != 0:
-            return {}
-        import json
-
-        try:
-            prs = json.loads(result.stdout)
-        except (json.JSONDecodeError, TypeError):
-            return {}
-        # Build branch -> best PR (prefer merged > open > closed)
-        branch_prs: dict[str, tuple[str, int]] = {}
-        priority = {"MERGED": 0, "OPEN": 1, "CLOSED": 2}
-        for pr in prs:
-            branch = pr.get("headRefName", "")
-            state = pr.get("state", "")
-            number = pr.get("number")
-            if branch and state and number is not None:
-                existing = branch_prs.get(branch)
-                if existing is None or priority.get(state, 99) < priority.get(
-                    existing[0], 99
-                ):
-                    branch_prs[branch] = (state.lower(), number)
-        return branch_prs
-
-    def _fetch_remotes() -> set[str]:
-        """Returns set of remote branch names."""
-        result = subprocess.run(
-            ["git", "-C", str(repo_path), "ls-remote", "--heads"],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            return set()
-        branches = set()
-        for line in result.stdout.splitlines():
-            # Format: <sha>\trefs/heads/<branch>
-            parts = line.split("\t")
-            if len(parts) == 2:
-                ref = parts[1]
-                branches.add(ref.removeprefix("refs/heads/"))
-        return branches
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        pr_future = pool.submit(_fetch_prs)
-        remote_future = pool.submit(_fetch_remotes)
-        pr_map = pr_future.result()
-        remote_set = remote_future.result()
-
-    # Match results to entries
-    for branch, entry_list in branch_to_entries.items():
-        pr_info = pr_map.get(branch)
-        has_remote = branch in remote_set
-        for entry in entry_list:
-            info = EntryGitInfo(has_remote=has_remote)
-            if pr_info is not None:
-                info.pr_state = pr_info[0]
-                info.pr_number = pr_info[1]
-            results[entry.name] = info
-
-    return results
-
-
 def get_git_status_tags(
     entry: WorktreeEntry,
     git: GitBackend,
@@ -1181,9 +1064,9 @@ def status(
 
     git = RealGitBackend()
 
-    # Batch-fetch all PR + remote branch info (2 network calls total)
-    git_info_map = prefetch_git_info(entries)
-
+    # Print entries with missing worktrees immediately, collect the rest
+    # for parallel git info fetching
+    live_entries: list[WorktreeEntry] = []
     for entry in entries:
         worktree = Path(entry.worktree_path)
         if not worktree.exists():
@@ -1191,15 +1074,61 @@ def status(
                 typer.echo(f"{entry.name}:  worktree removed")
             else:
                 typer.echo(f"{entry.name}:  worktree missing")
-            continue
+        else:
+            live_entries.append(entry)
 
-        agent_status, details = check_agent_status(entry)
-        git_tags = get_git_status_tags(
-            entry, git, registry=registry, git_info=git_info_map.get(entry.name)
+    if not live_entries:
+        return
+
+    # Resolve lifecycle status (local, fast) for all live entries
+    lifecycle: dict[str, tuple[str, dict[str, str]]] = {}
+    for entry in live_entries:
+        lifecycle[entry.name] = check_agent_status(entry)
+
+    # For entries with cached merged_pr, print immediately
+    needs_fetch: list[WorktreeEntry] = []
+    for entry in live_entries:
+        if entry.merged_pr:
+            agent_status, details = lifecycle[entry.name]
+            git_tags = ["PR merged"]
+            # Still need dirty/clean (local, fast)
+            worktree_path = Path(entry.worktree_path)
+            if git.has_uncommitted_changes(worktree_path):
+                git_tags.append("dirty")
+            else:
+                git_tags.append("clean")
+            typer.echo(
+                _format_status_line(
+                    entry.name, agent_status, details, git_tags=git_tags
+                )
+            )
+        else:
+            needs_fetch.append(entry)
+
+    if not needs_fetch:
+        return
+
+    # Fetch git info in parallel, stream results as they resolve
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _resolve_entry(
+        entry: WorktreeEntry,
+    ) -> tuple[WorktreeEntry, list[str]]:
+        return (
+            entry,
+            get_git_status_tags(entry, git, registry=registry),
         )
-        typer.echo(
-            _format_status_line(entry.name, agent_status, details, git_tags=git_tags)
-        )
+
+    with ThreadPoolExecutor(max_workers=min(len(needs_fetch), 5)) as pool:
+        futures = {pool.submit(_resolve_entry, entry): entry for entry in needs_fetch}
+        for future in as_completed(futures):
+            entry, git_tags = future.result()
+            agent_status, details = lifecycle[entry.name]
+            typer.echo(
+                _format_status_line(
+                    entry.name, agent_status, details, git_tags=git_tags
+                )
+            )
 
 
 if __name__ == "__main__":

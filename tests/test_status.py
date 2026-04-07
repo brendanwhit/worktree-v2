@@ -16,7 +16,6 @@ from superintendent.cli.main import (
     app,
     check_agent_status,
     get_git_status_tags,
-    prefetch_git_info,
 )
 from superintendent.state.registry import WorktreeEntry, WorktreeRegistry
 
@@ -584,35 +583,8 @@ class TestGitStatusCaching:
         assert f"PR {expected_link}" in tags
 
 
-class TestPrefetchGitInfo:
-    def test_cached_merged_skips_fetch(self, tmp_path: Path):
-        wt = tmp_path / "wt"
-        wt.mkdir()
-        entries = [
-            WorktreeEntry(
-                name="cached",
-                repo="/tmp/repo",
-                branch="feat",
-                worktree_path=str(wt),
-                merged_pr=True,
-            ),
-        ]
-        results = prefetch_git_info(entries)
-        assert results["cached"].pr_state == "merged"
-
-    def test_missing_worktree_skipped(self):
-        entries = [
-            WorktreeEntry(
-                name="gone",
-                repo="/tmp/repo",
-                branch="feat",
-                worktree_path="/nonexistent",
-            ),
-        ]
-        results = prefetch_git_info(entries)
-        assert "gone" not in results
-
-    def test_prefetched_git_info_passed_to_tags(self, tmp_path: Path):
+class TestEntryGitInfoPassthrough:
+    def test_git_info_open_pr(self, tmp_path: Path):
         """get_git_status_tags uses git_info param instead of calling API."""
         wt = tmp_path / "wt"
         wt.mkdir()
@@ -624,7 +596,7 @@ class TestPrefetchGitInfo:
         tags = get_git_status_tags(entry, git, git_info=info)
         assert "PR #99" in tags
 
-    def test_prefetched_has_remote_used(self, tmp_path: Path):
+    def test_git_info_has_remote(self, tmp_path: Path):
         """has_remote from git_info is used instead of remote_branch_exists."""
         wt = tmp_path / "wt"
         wt.mkdir()
