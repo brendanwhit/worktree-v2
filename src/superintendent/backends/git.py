@@ -178,7 +178,18 @@ class RealGitBackend:
 
     def create_worktree(self, repo: Path, branch: str, target: Path) -> bool:
         result = subprocess.run(
-            ["git", "-C", str(repo), "worktree", "add", str(target), "-b", branch],
+            [
+                "git",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-C",
+                str(repo),
+                "worktree",
+                "add",
+                str(target),
+                "-b",
+                branch,
+            ],
             capture_output=True,
             text=True,
         )
@@ -273,7 +284,17 @@ class RealGitBackend:
         self, repo: Path, branch: str, target: Path
     ) -> bool:
         result = subprocess.run(
-            ["git", "-C", str(repo), "worktree", "add", str(target), branch],
+            [
+                "git",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-C",
+                str(repo),
+                "worktree",
+                "add",
+                str(target),
+                branch,
+            ],
             capture_output=True,
             text=True,
         )
