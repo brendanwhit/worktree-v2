@@ -26,19 +26,16 @@ class WorktreeEntry:
     merged_pr: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {
+        return {
             "name": self.name,
             "repo": self.repo,
             "branch": self.branch,
             "worktree_path": self.worktree_path,
             "sandbox_name": self.sandbox_name,
             "created_at": self.created_at,
+            "github_url": self.github_url,
+            "merged_pr": self.merged_pr,
         }
-        if self.github_url is not None:
-            d["github_url"] = self.github_url
-        if self.merged_pr:
-            d["merged_pr"] = self.merged_pr
-        return d
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "WorktreeEntry":

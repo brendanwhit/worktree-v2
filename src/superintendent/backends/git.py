@@ -1,5 +1,6 @@
 """GitBackend protocol and implementations (Real, Mock, DryRun)."""
 
+import json
 import subprocess
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -402,8 +403,6 @@ class RealGitBackend:
         if result.returncode != 0:
             return False
         try:
-            import json
-
             prs = json.loads(result.stdout)
             return len(prs) > 0
         except (json.JSONDecodeError, TypeError):
@@ -429,8 +428,6 @@ class RealGitBackend:
         if result.returncode != 0:
             return None
         try:
-            import json
-
             prs = json.loads(result.stdout)
             if prs:
                 return prs[0]["number"]
@@ -460,16 +457,13 @@ class RealGitBackend:
         if result.returncode != 0:
             return ("none", None)
         try:
-            import json
-
             prs = json.loads(result.stdout)
-            # Prefer merged > open > closed
-            for state in ("MERGED", "OPEN", "CLOSED"):
-                for pr in prs:
-                    if pr.get("state") == state:
-                        return (state.lower(), pr.get("number"))
-            return ("none", None)
-        except (json.JSONDecodeError, TypeError, KeyError):
+            if not prs:
+                return ("none", None)
+            # gh returns newest first; take the first result
+            pr = prs[0]
+            return (pr["state"].lower(), pr["number"])
+        except (json.JSONDecodeError, TypeError, KeyError, IndexError):
             return ("none", None)
 
     def remote_branch_exists(self, repo: Path, branch: str) -> bool:

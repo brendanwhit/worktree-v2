@@ -11,6 +11,8 @@ Subcommands:
 import os
 import re
 import subprocess
+import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -929,8 +931,6 @@ def _hyperlink(url: str, text: str) -> str:
 
     Falls back to plain text when stdout is not a TTY (piped, redirected).
     """
-    import sys
-
     if not sys.stdout.isatty():
         return text
     return f"\033]8;;{url}\033\\{_UNDERLINE_ON}{text}{_UNDERLINE_OFF}\033]8;;\033\\"
@@ -949,7 +949,7 @@ def get_git_status_tags(
     entry: WorktreeEntry,
     git: GitBackend,
     registry: WorktreeRegistry | None = None,
-    git_info: "EntryGitInfo | None" = None,
+    git_info: EntryGitInfo | None = None,
 ) -> list[str]:
     """Gather git-level status tags for an entry.
 
@@ -1119,8 +1119,6 @@ def status(
         return
 
     # Fetch git info in parallel, stream results as they resolve
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
     def _resolve_entry(
         entry: WorktreeEntry,
     ) -> tuple[WorktreeEntry, list[str]]:
