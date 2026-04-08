@@ -523,10 +523,9 @@ class TestDryRunCommandContent:
 
         git = backends.git
         assert isinstance(git, DryRunGitBackend)
-        worktree_cmds = [c for c in git.commands if "worktree" in c]
+        worktree_cmds = [c for c in git.commands if "worktree add" in c]
         assert len(worktree_cmds) == 1
         assert "feature-branch" in worktree_cmds[0]
-        assert "worktree add" in worktree_cmds[0]
 
     def test_docker_create_command_includes_workspace(self) -> None:
         """Docker create command includes workspace path as positional arg."""

@@ -432,6 +432,11 @@ def run(
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Suppress non-error output."
     ),
+    no_merge: bool = typer.Option(
+        False,
+        "--no-merge",
+        help="Skip auto-merging main into stale branches when reusing worktrees.",
+    ),
     dangerously_skip_isolation: bool = typer.Option(
         False,
         "--dangerously-skip-isolation",
@@ -484,6 +489,7 @@ def run(
         context_file=context_file,
         sandbox_name=sandbox_name,
         force=force,
+        no_merge=no_merge,
     )
 
     plan = planner.create_plan(planner_input)
@@ -529,11 +535,17 @@ def run(
     registry.add(entry)
 
     if verbosity != Verbosity.quiet:
+        wt_output = context.step_outputs.get("create_worktree", {})
+        merge_msg = wt_output.get("merge_message")
+        if merge_msg:
+            typer.echo(merge_msg)
+        if wt_output.get("reused"):
+            typer.echo(f"Reusing existing worktree for {branch_name}.")
         typer.echo(f"Agent spawned for {plan.metadata.get('repo_name', repo)}.")
         env = plan.metadata.get("sandbox_name") or plan.metadata.get("container_name")
         if env:
             typer.echo(f"  Environment: {env}")
-        wt = context.step_outputs.get("create_worktree", {}).get("worktree_path")
+        wt = wt_output.get("worktree_path")
         if wt:
             typer.echo(f"  Worktree: {wt}")
 
@@ -556,7 +568,7 @@ def list_cmd() -> None:
             )
 
 
-@app.command()
+@app.command(deprecated=True)
 def resume(
     name: str = typer.Option(..., help="Name or branch of the entry to resume."),
     repo: str | None = typer.Option(
@@ -566,7 +578,13 @@ def resume(
         False, "--no-merge", help="Skip auto-merging main into stale branches."
     ),
 ) -> None:
-    """Resume an existing entry."""
+    """Resume an existing entry. (Deprecated: use 'run --branch' instead.)"""
+    typer.echo(
+        "Warning: 'resume' is deprecated. Use 'run --branch <branch>' instead, "
+        "which now reuses existing worktrees and auto-merges stale branches.",
+        err=True,
+    )
+
     registry = get_default_registry()
     entry = resume_entry(name, registry)
 
