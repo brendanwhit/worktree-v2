@@ -178,10 +178,6 @@ class RealStepHandler:
 
         if standalone:
             ok = git.clone_for_sandbox(repo_path, worktree_path, branch)
-        elif self._context.dry_run:
-            # Dry-run uses DryRunGitBackend (logs command, no side effects).
-            # Skip reuse/attach checks since filesystem state is irrelevant.
-            ok = git.create_worktree(repo_path, branch, worktree_path)
         elif force and worktree_path.exists():
             # --force: remove existing worktree and recreate from scratch
             git.remove_worktree(repo_path, worktree_path)
