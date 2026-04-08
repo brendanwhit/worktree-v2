@@ -645,7 +645,7 @@ class TestValidateAuthHandler:
 
         original_run = sp.run
 
-        def mock_run(cmd, **kwargs):
+        def mock_run(cmd, **kwargs):  # noqa: ARG001
             if cmd[:3] == ["gh", "auth", "token"]:
                 result = type(
                     "Result", (), {"returncode": 1, "stdout": "", "stderr": ""}
@@ -682,6 +682,213 @@ class TestValidateAuthHandler:
         )
         result = handler.execute(step)
         assert result.success is True
+
+
+# ---------------------------------------------------------------------------
+# Token resolution and repo identification
+# ---------------------------------------------------------------------------
+
+
+class TestResolveTokenChain:
+    """Tests for _resolve_token and _get_repo_identifier.
+
+    These methods call subprocess.run directly (bypassing the git backend),
+    which makes them invisible to mock backends. Without these tests, broken
+    URL parsing or token resolution would be silently hidden.
+    """
+
+    def test_repo_specific_token_found(self, tmp_path, monkeypatch):
+        """When validate_repo output exists and a repo-specific token matches,
+        validate_auth succeeds through the repo-specific path."""
+        import subprocess as sp
+
+        store = TokenStore(path=tmp_path / "tokens.json")
+        store.add("_default", "ghp_default", github_user="myuser")
+        store.add("myorg/myrepo", "ghp_org_specific", github_user="myuser")
+        ctx = ExecutionContext(backends=_mock_backends(), token_store=store)
+        ctx.step_outputs["validate_repo"] = {"repo_path": str(tmp_path)}
+        handler = RealStepHandler(ctx)
+
+        # Mock subprocess to simulate git remote get-url returning a known URL
+        original_run = sp.run
+
+        def mock_run(cmd, **kwargs):  # noqa: ARG001
+            if cmd[:4] == ["git", "-C", str(tmp_path), "remote"]:
+                return type(
+                    "Result",
+                    (),
+                    {
+                        "returncode": 0,
+                        "stdout": "https://github.com/myorg/myrepo.git\n",
+                        "stderr": "",
+                    },
+                )()
+            return original_run(cmd, **kwargs)
+
+        monkeypatch.setattr(sp, "run", mock_run)
+
+        step = WorkflowStep(
+            id="validate_auth",
+            action="validate_auth",
+            params={},
+            depends_on=["validate_repo"],
+        )
+        result = handler.execute(step)
+        assert result.success is True
+
+    def test_org_requires_explicit_token(self, tmp_path, monkeypatch):
+        """When repo belongs to an org different from default user,
+        validate_auth fails with 'org_requires_explicit' message."""
+        import subprocess as sp
+
+        store = TokenStore(path=tmp_path / "tokens.json")
+        store.add("_default", "ghp_personal", github_user="myuser")
+        # No org-specific token configured
+        ctx = ExecutionContext(backends=_mock_backends(), token_store=store)
+        ctx.step_outputs["validate_repo"] = {"repo_path": str(tmp_path)}
+        handler = RealStepHandler(ctx)
+
+        def mock_run(cmd, **kwargs):  # noqa: ARG001
+            if cmd[:4] == ["git", "-C", str(tmp_path), "remote"]:
+                return type(
+                    "Result",
+                    (),
+                    {
+                        "returncode": 0,
+                        "stdout": "git@github.com:someorg/somerepo.git\n",
+                        "stderr": "",
+                    },
+                )()
+            return (
+                sp.run.__wrapped__(cmd, **kwargs)
+                if hasattr(sp.run, "__wrapped__")
+                else type("Result", (), {"returncode": 1, "stdout": "", "stderr": ""})()
+            )
+
+        monkeypatch.setattr(sp, "run", mock_run)
+
+        step = WorkflowStep(
+            id="validate_auth",
+            action="validate_auth",
+            params={},
+            depends_on=["validate_repo"],
+        )
+        result = handler.execute(step)
+        assert result.success is False
+        assert (
+            "org repo" in result.message.lower()
+            or "No token configured" in result.message
+        )
+
+    def test_get_repo_identifier_parses_ssh_url(self, tmp_path, monkeypatch):
+        """_get_repo_identifier correctly parses SSH remote URLs."""
+        import subprocess as sp
+
+        ctx = ExecutionContext(backends=_mock_backends())
+        handler = RealStepHandler(ctx)
+
+        def mock_run(cmd, **kwargs):  # noqa: ARG001
+            if "remote" in cmd and "get-url" in cmd:
+                return type(
+                    "Result",
+                    (),
+                    {
+                        "returncode": 0,
+                        "stdout": "git@github.com:owner/repo.git\n",
+                        "stderr": "",
+                    },
+                )()
+            return type("Result", (), {"returncode": 1, "stdout": "", "stderr": ""})()
+
+        monkeypatch.setattr(sp, "run", mock_run)
+
+        result = handler._get_repo_identifier(tmp_path)
+        assert result == "owner/repo"
+
+    def test_get_repo_identifier_parses_https_url(self, tmp_path, monkeypatch):
+        """_get_repo_identifier correctly parses HTTPS remote URLs."""
+        import subprocess as sp
+
+        ctx = ExecutionContext(backends=_mock_backends())
+        handler = RealStepHandler(ctx)
+
+        def mock_run(cmd, **kwargs):  # noqa: ARG001
+            if "remote" in cmd and "get-url" in cmd:
+                return type(
+                    "Result",
+                    (),
+                    {
+                        "returncode": 0,
+                        "stdout": "https://github.com/owner/repo.git\n",
+                        "stderr": "",
+                    },
+                )()
+            return type("Result", (), {"returncode": 1, "stdout": "", "stderr": ""})()
+
+        monkeypatch.setattr(sp, "run", mock_run)
+
+        result = handler._get_repo_identifier(tmp_path)
+        assert result == "owner/repo"
+
+    def test_get_repo_identifier_returns_none_for_non_github(
+        self, tmp_path, monkeypatch
+    ):
+        """_get_repo_identifier returns None for non-GitHub remotes."""
+        import subprocess as sp
+
+        ctx = ExecutionContext(backends=_mock_backends())
+        handler = RealStepHandler(ctx)
+
+        def mock_run(cmd, **kwargs):  # noqa: ARG001
+            if "remote" in cmd and "get-url" in cmd:
+                return type(
+                    "Result",
+                    (),
+                    {
+                        "returncode": 0,
+                        "stdout": "https://gitlab.com/owner/repo.git\n",
+                        "stderr": "",
+                    },
+                )()
+            return type("Result", (), {"returncode": 1, "stdout": "", "stderr": ""})()
+
+        monkeypatch.setattr(sp, "run", mock_run)
+
+        result = handler._get_repo_identifier(tmp_path)
+        assert result is None
+
+    def test_authenticate_no_token_setup_git_auth_fails(self, tmp_path, monkeypatch):
+        """When no token is available AND setup_git_auth fails, authenticate fails."""
+        import subprocess as sp
+
+        monkeypatch.delenv("GH_TOKEN", raising=False)
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+
+        auth = MockAuthBackend(fail_on="setup_git_auth")
+        store = TokenStore(path=tmp_path / "empty-tokens.json")
+        ctx = ExecutionContext(backends=_mock_backends(auth=auth), token_store=store)
+        handler = RealStepHandler(ctx)
+
+        # Make gh auth token fail too
+        def mock_run(cmd, **kwargs):  # noqa: ARG001
+            if cmd[:3] == ["gh", "auth", "token"]:
+                return type(
+                    "Result", (), {"returncode": 1, "stdout": "", "stderr": ""}
+                )()
+            return type("Result", (), {"returncode": 1, "stdout": "", "stderr": ""})()
+
+        monkeypatch.setattr(sp, "run", mock_run)
+
+        step = WorkflowStep(
+            id="authenticate",
+            action="authenticate",
+            params={"sandbox_name": "claude-test"},
+            depends_on=["prepare_sandbox"],
+        )
+        result = handler.execute(step)
+
+        assert result.success is False
+        assert "no token available" in result.message.lower()
 
 
 # ---------------------------------------------------------------------------
