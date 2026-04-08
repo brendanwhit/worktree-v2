@@ -11,6 +11,8 @@ Subcommands:
 import os
 import re
 import subprocess
+import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -900,7 +902,142 @@ def check_agent_status(entry: WorktreeEntry) -> tuple[str, dict[str, str]]:
     return ("running", details)
 
 
-def _format_status_line(name: str, status: str, details: dict[str, str]) -> str:
+def _get_github_url(worktree_path: Path) -> str | None:
+    """Extract the GitHub HTTPS URL from a worktree's origin remote."""
+    result = subprocess.run(
+        ["git", "-C", str(worktree_path), "remote", "get-url", "origin"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    url = result.stdout.strip()
+    # Normalize git@github.com:user/repo.git → https://github.com/user/repo
+    if url.startswith("git@github.com:"):
+        url = "https://github.com/" + url[len("git@github.com:") :]
+    if url.endswith(".git"):
+        url = url[:-4]
+    if "github.com" in url:
+        return url
+    return None
+
+
+_UNDERLINE_ON = "\033[4m"
+_UNDERLINE_OFF = "\033[24m"
+
+
+def _hyperlink(url: str, text: str) -> str:
+    """Format text as a clickable, underlined terminal hyperlink (OSC 8).
+
+    Falls back to plain text when stdout is not a TTY (piped, redirected).
+    """
+    if not sys.stdout.isatty():
+        return text
+    return f"\033]8;;{url}\033\\{_UNDERLINE_ON}{text}{_UNDERLINE_OFF}\033]8;;\033\\"
+
+
+@dataclass
+class EntryGitInfo:
+    """Pre-fetched git info for a single entry."""
+
+    pr_state: str = "none"  # "merged", "open", "closed", "none"
+    pr_number: int | None = None
+    has_remote: bool = False
+
+
+def get_git_status_tags(
+    entry: WorktreeEntry,
+    git: GitBackend,
+    registry: WorktreeRegistry | None = None,
+    git_info: EntryGitInfo | None = None,
+) -> list[str]:
+    """Gather git-level status tags for an entry.
+
+    Returns a list of short tags like "dirty", "unpushed", "PR merged", etc.
+    Returns an empty list if the worktree path doesn't exist.
+
+    Uses cached fields on the entry when available (merged_pr, github_url)
+    to avoid repeated network calls. Updates the registry when cache misses
+    are resolved.
+
+    If git_info is provided (from prefetch_git_info), uses it instead
+    of making per-entry network calls.
+    """
+    worktree_path = Path(entry.worktree_path)
+    if not worktree_path.exists():
+        return []
+
+    tags: list[str] = []
+    cache_dirty = False
+
+    # Resolve PR and remote state
+    if entry.merged_pr:
+        pr_state, pr_number, has_remote = "merged", None, False
+    elif git_info is not None:
+        pr_state = git_info.pr_state
+        pr_number = git_info.pr_number
+        has_remote = git_info.has_remote
+    else:
+        # Fallback: per-entry fetch (used when called without prefetch)
+        pr_state, pr_number = git.get_pr_status(worktree_path, entry.branch)
+        # Only check remote if no PR — PR states already imply remote exists
+        has_remote = pr_state in ("merged", "open") or git.remote_branch_exists(
+            worktree_path, entry.branch
+        )
+
+    if pr_state == "merged":
+        tags.append("PR merged")
+        if not entry.merged_pr:
+            entry.merged_pr = True
+            cache_dirty = True
+    elif pr_state == "open" and pr_number is not None:
+        github_url = entry.github_url
+        if github_url is None:
+            github_url = _get_github_url(worktree_path)
+            if github_url:
+                entry.github_url = github_url
+                cache_dirty = True
+        if github_url:
+            pr_label = (
+                f"PR {_hyperlink(f'{github_url}/pull/{pr_number}', f'#{pr_number}')}"
+            )
+        else:
+            pr_label = f"PR #{pr_number}"
+        has_unpushed = git.has_unpushed_commits(worktree_path, entry.branch)
+        if has_unpushed:
+            tags.append(f"{pr_label}, unpushed commits")
+        else:
+            tags.append(pr_label)
+    else:
+        has_unpushed = git.has_unpushed_commits(worktree_path, entry.branch)
+        if has_remote and has_unpushed:
+            tags.append("unpushed commits")
+        elif has_remote:
+            tags.append("pushed")
+        elif has_unpushed:
+            tags.append("local only")
+        else:
+            tags.append("no commits")
+
+    # Working tree cleanliness (independent dimension, always local)
+    if git.has_uncommitted_changes(worktree_path):
+        tags.append("dirty")
+    else:
+        tags.append("clean")
+
+    # Persist cache updates
+    if cache_dirty and registry is not None:
+        registry.add(entry)
+
+    return tags
+
+
+def _format_status_line(
+    name: str,
+    status: str,
+    details: dict[str, str],
+    git_tags: list[str] | None = None,
+) -> str:
     """Format a single status line for display."""
     info_parts: list[str] = []
     if status in ("running", "sandbox_stopped") and "start_time" in details:
@@ -913,7 +1050,8 @@ def _format_status_line(name: str, status: str, details: dict[str, str]) -> str:
         if "end_time" in details:
             info_parts.append(f"ended {_time_ago(details['end_time'])}")
     info = f"  ({', '.join(info_parts)})" if info_parts else ""
-    return f"{name}:  {status}{info}"
+    git_info = f"  [{', '.join(git_tags)}]" if git_tags else ""
+    return f"{name}:  {status}{info}{git_info}"
 
 
 @app.command()
@@ -934,6 +1072,11 @@ def status(
             typer.echo(f"No entry found with name '{name}'", err=True)
             raise typer.Exit(code=1)
 
+    git = RealGitBackend()
+
+    # Print entries with missing worktrees immediately, collect the rest
+    # for parallel git info fetching
+    live_entries: list[WorktreeEntry] = []
     for entry in entries:
         worktree = Path(entry.worktree_path)
         if not worktree.exists():
@@ -941,10 +1084,59 @@ def status(
                 typer.echo(f"{entry.name}:  worktree removed")
             else:
                 typer.echo(f"{entry.name}:  worktree missing")
-            continue
+        else:
+            live_entries.append(entry)
 
-        agent_status, details = check_agent_status(entry)
-        typer.echo(_format_status_line(entry.name, agent_status, details))
+    if not live_entries:
+        return
+
+    # Resolve lifecycle status (local, fast) for all live entries
+    lifecycle: dict[str, tuple[str, dict[str, str]]] = {}
+    for entry in live_entries:
+        lifecycle[entry.name] = check_agent_status(entry)
+
+    # For entries with cached merged_pr, print immediately
+    needs_fetch: list[WorktreeEntry] = []
+    for entry in live_entries:
+        if entry.merged_pr:
+            agent_status, details = lifecycle[entry.name]
+            git_tags = ["PR merged"]
+            # Still need dirty/clean (local, fast)
+            worktree_path = Path(entry.worktree_path)
+            if git.has_uncommitted_changes(worktree_path):
+                git_tags.append("dirty")
+            else:
+                git_tags.append("clean")
+            typer.echo(
+                _format_status_line(
+                    entry.name, agent_status, details, git_tags=git_tags
+                )
+            )
+        else:
+            needs_fetch.append(entry)
+
+    if not needs_fetch:
+        return
+
+    # Fetch git info in parallel, stream results as they resolve
+    def _resolve_entry(
+        entry: WorktreeEntry,
+    ) -> tuple[WorktreeEntry, list[str]]:
+        return (
+            entry,
+            get_git_status_tags(entry, git, registry=registry),
+        )
+
+    with ThreadPoolExecutor(max_workers=min(len(needs_fetch), 5)) as pool:
+        futures = {pool.submit(_resolve_entry, entry): entry for entry in needs_fetch}
+        for future in as_completed(futures):
+            entry, git_tags = future.result()
+            agent_status, details = lifecycle[entry.name]
+            typer.echo(
+                _format_status_line(
+                    entry.name, agent_status, details, git_tags=git_tags
+                )
+            )
 
 
 if __name__ == "__main__":
