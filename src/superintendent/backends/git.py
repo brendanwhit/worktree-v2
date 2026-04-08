@@ -1,5 +1,6 @@
 """GitBackend protocol and implementations (Real, Mock, DryRun)."""
 
+import json
 import subprocess
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -140,6 +141,21 @@ class GitBackend(Protocol):
         """Check if the branch has a merged PR (via gh CLI)."""
         ...
 
+    def has_open_pr(self, repo: Path, branch: str) -> int | None:
+        """Check if the branch has an open PR (via gh CLI).
+
+        Returns the PR number if found, None otherwise.
+        """
+        ...
+
+    def get_pr_status(self, repo: Path, branch: str) -> tuple[str, int | None]:
+        """Get PR state for a branch in a single API call.
+
+        Returns (state, pr_number) where state is one of:
+        "merged", "open", "closed", or "none".
+        """
+        ...
+
     def remote_branch_exists(self, repo: Path, branch: str) -> bool:
         """Check if the remote tracking branch still exists."""
         ...
@@ -186,7 +202,24 @@ class RealGitBackend:
             capture_output=True,
             text=True,
         )
-        return result.returncode == 0
+        if result.returncode == 0:
+            return True
+        # Worktree may have been created despite post-checkout hook failure.
+        # Verify by checking git's worktree registry rather than filesystem state.
+        return self._worktree_exists(repo, target)
+
+    def _worktree_exists(self, repo: Path, target: Path) -> bool:
+        """Check if a worktree path is registered in git's worktree list."""
+        check = subprocess.run(
+            ["git", "-C", str(repo), "worktree", "list", "--porcelain"],
+            capture_output=True,
+            text=True,
+        )
+        resolved = str(target.resolve())
+        for line in check.stdout.splitlines():
+            if line.startswith("worktree ") and line.split(" ", 1)[1] == resolved:
+                return True
+        return False
 
     def fetch(self, repo: Path) -> bool:
         result = subprocess.run(
@@ -281,7 +314,11 @@ class RealGitBackend:
             capture_output=True,
             text=True,
         )
-        return result.returncode == 0
+        if result.returncode == 0:
+            return True
+        # Worktree may have been created despite post-checkout hook failure.
+        # Verify by checking git's worktree registry rather than filesystem state.
+        return self._worktree_exists(repo, target)
 
     def remove_worktree(self, repo: Path, target: Path) -> bool:
         result = subprocess.run(
@@ -378,12 +415,68 @@ class RealGitBackend:
         if result.returncode != 0:
             return False
         try:
-            import json
-
             prs = json.loads(result.stdout)
             return len(prs) > 0
         except (json.JSONDecodeError, TypeError):
             return False
+
+    def has_open_pr(self, repo: Path, branch: str) -> int | None:
+        result = subprocess.run(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--head",
+                branch,
+                "--state",
+                "open",
+                "--json",
+                "number",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(repo),
+        )
+        if result.returncode != 0:
+            return None
+        try:
+            prs = json.loads(result.stdout)
+            if prs:
+                return prs[0]["number"]
+            return None
+        except (json.JSONDecodeError, TypeError, KeyError, IndexError):
+            return None
+
+    def get_pr_status(self, repo: Path, branch: str) -> tuple[str, int | None]:
+        result = subprocess.run(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--head",
+                branch,
+                "--state",
+                "all",
+                "--json",
+                "number,state",
+                "--limit",
+                "10",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(repo),
+        )
+        if result.returncode != 0:
+            return ("none", None)
+        try:
+            prs = json.loads(result.stdout)
+            if not prs:
+                return ("none", None)
+            # gh returns newest first; take the first result
+            pr = prs[0]
+            return (pr["state"].lower(), pr["number"])
+        except (json.JSONDecodeError, TypeError, KeyError, IndexError):
+            return ("none", None)
 
     def remote_branch_exists(self, repo: Path, branch: str) -> bool:
         result = subprocess.run(
@@ -558,6 +651,7 @@ class MockGitBackend:
 
     # Smart cleanup mock state
     merged_branches: set[str] = field(default_factory=set)
+    open_prs: dict[str, int] = field(default_factory=dict)
     remote_branches: set[str] = field(default_factory=set)
     dirty_worktrees: set[str] = field(default_factory=set)
     unpushed_branches: set[str] = field(default_factory=set)
@@ -630,6 +724,21 @@ class MockGitBackend:
 
     def has_merged_pr(self, repo: Path, branch: str) -> bool:  # noqa: ARG002
         return branch in self.merged_branches
+
+    def has_open_pr(self, repo: Path, branch: str) -> int | None:  # noqa: ARG002
+        return self.open_prs.get(branch)
+
+    def get_pr_status(
+        self,
+        repo: Path,  # noqa: ARG002
+        branch: str,  # noqa: ARG002
+    ) -> tuple[str, int | None]:
+        if branch in self.merged_branches:
+            return ("merged", None)
+        pr_num = self.open_prs.get(branch)
+        if pr_num is not None:
+            return ("open", pr_num)
+        return ("none", None)
 
     def remote_branch_exists(self, repo: Path, branch: str) -> bool:  # noqa: ARG002
         return branch in self.remote_branches
@@ -708,6 +817,20 @@ class DryRunGitBackend:
     def has_merged_pr(self, repo: Path, branch: str) -> bool:  # noqa: ARG002
         self.commands.append(f"gh pr list --head {branch} --state merged --json number")
         return False
+
+    def has_open_pr(self, repo: Path, branch: str) -> int | None:  # noqa: ARG002
+        self.commands.append(f"gh pr list --head {branch} --state open --json number")
+        return None
+
+    def get_pr_status(
+        self,
+        repo: Path,  # noqa: ARG002
+        branch: str,  # noqa: ARG002
+    ) -> tuple[str, int | None]:
+        self.commands.append(
+            f"gh pr list --head {branch} --state all --json number,state"
+        )
+        return ("none", None)
 
     def remote_branch_exists(self, repo: Path, branch: str) -> bool:
         self.commands.append(f"git -C {repo} ls-remote --heads origin {branch}")

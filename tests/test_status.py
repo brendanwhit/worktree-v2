@@ -6,12 +6,16 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
+from superintendent.backends.git import MockGitBackend
 from superintendent.cli.main import (
+    EntryGitInfo,
     _format_duration,
     _format_status_line,
+    _hyperlink,
     _is_sandbox_alive,
     app,
     check_agent_status,
+    get_git_status_tags,
 )
 from superintendent.state.registry import WorktreeEntry, WorktreeRegistry
 
@@ -338,6 +342,382 @@ class TestFormatStatusLineSandboxStopped:
     def test_sandbox_stopped_no_details(self):
         line = _format_status_line("my-entry", "sandbox_stopped", {})
         assert "sandbox_stopped" in line
+
+
+class TestGetGitStatusTags:
+    def test_merged_pr_clean(self, tmp_path: Path):
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(wt),
+        )
+        git = MockGitBackend(merged_branches={"feat"}, remote_branches={"feat"})
+        tags = get_git_status_tags(entry, git)
+        assert "PR merged" in tags
+        assert "clean" in tags
+        assert "unpushed" not in tags
+
+    def test_remote_with_unpushed_commits(self, tmp_path: Path):
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(wt),
+        )
+        git = MockGitBackend(
+            remote_branches={"feat"},
+            dirty_worktrees={str(wt)},
+            unpushed_branches={"feat"},
+        )
+        tags = get_git_status_tags(entry, git)
+        assert "unpushed commits" in tags
+        assert "dirty" in tags
+
+    def test_pushed_and_synced(self, tmp_path: Path):
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(wt),
+        )
+        git = MockGitBackend(remote_branches={"feat"})
+        tags = get_git_status_tags(entry, git)
+        assert "pushed" in tags
+        assert "clean" in tags
+
+    def test_local_only_commits(self, tmp_path: Path):
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(wt),
+        )
+        git = MockGitBackend(unpushed_branches={"feat"})
+        tags = get_git_status_tags(entry, git)
+        assert "local only" in tags
+
+    def test_no_commits(self, tmp_path: Path):
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(wt),
+        )
+        git = MockGitBackend(remote_branches=set())
+        tags = get_git_status_tags(entry, git)
+        assert "no commits" in tags
+        assert "clean" in tags
+
+    def test_open_pr(self, tmp_path: Path):
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(wt),
+        )
+        git = MockGitBackend(
+            open_prs={"feat": 42},
+            remote_branches={"feat"},
+        )
+        tags = get_git_status_tags(entry, git)
+        assert "PR #42" in tags
+        assert "clean" in tags
+
+    def test_open_pr_with_unpushed(self, tmp_path: Path):
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(wt),
+        )
+        git = MockGitBackend(
+            open_prs={"feat": 17},
+            remote_branches={"feat"},
+            unpushed_branches={"feat"},
+        )
+        tags = get_git_status_tags(entry, git)
+        assert "PR #17, unpushed commits" in tags
+
+    def test_open_pr_with_hyperlink_tty(self, tmp_path: Path):
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(wt),
+        )
+        git = MockGitBackend(
+            open_prs={"feat": 42},
+            remote_branches={"feat"},
+        )
+        with (
+            patch(
+                "superintendent.cli.main._get_github_url",
+                return_value="https://github.com/owner/repo",
+            ),
+            patch("sys.stdout") as mock_stdout,
+        ):
+            mock_stdout.isatty.return_value = True
+            tags = get_git_status_tags(entry, git)
+            # Verify the tag contains OSC 8 escape sequences
+            pr_tag = [t for t in tags if "PR" in t][0]
+            assert "\033]8;;" in pr_tag
+            assert "#42" in pr_tag
+
+    def test_missing_worktree_returns_empty(self):
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path="/nonexistent/path",
+        )
+        git = MockGitBackend()
+        tags = get_git_status_tags(entry, git)
+        assert tags == []
+
+
+class TestHyperlink:
+    def test_hyperlink_format_tty(self):
+        with patch("sys.stdout") as mock_stdout:
+            mock_stdout.isatty.return_value = True
+            result = _hyperlink("https://example.com", "click me")
+        assert result == (
+            "\033]8;;https://example.com\033\\\033[4mclick me\033[24m\033]8;;\033\\"
+        )
+
+    def test_hyperlink_plain_when_not_tty(self):
+        with patch("sys.stdout") as mock_stdout:
+            mock_stdout.isatty.return_value = False
+            result = _hyperlink("https://example.com", "#42")
+        assert result == "#42"
+
+    def test_hyperlink_contains_text(self):
+        with patch("sys.stdout") as mock_stdout:
+            mock_stdout.isatty.return_value = True
+            result = _hyperlink("https://example.com", "#42")
+        assert "#42" in result
+
+
+class TestGitStatusCaching:
+    def test_merged_pr_cached_skips_network(self, tmp_path: Path):
+        """When entry.merged_pr is True, get_pr_status is never called."""
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(wt),
+            merged_pr=True,
+        )
+        # No merged_branches set — get_pr_status would return "none"
+        git = MockGitBackend()
+        tags = get_git_status_tags(entry, git)
+        assert "PR merged" in tags
+        assert "clean" in tags
+
+    def test_merged_pr_persisted_to_registry(self, tmp_path: Path):
+        """First call discovers merged PR and caches it on the registry."""
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        registry = WorktreeRegistry(tmp_path / "registry.json")
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(wt),
+        )
+        registry.add(entry)
+
+        git = MockGitBackend(merged_branches={"feat"})
+        tags = get_git_status_tags(entry, git, registry=registry)
+        assert "PR merged" in tags
+
+        # Verify the registry was updated with the cache
+        reloaded = registry.get("test")
+        assert reloaded is not None
+        assert reloaded.merged_pr is True
+
+    def test_github_url_cached_on_entry(self, tmp_path: Path):
+        """github_url is resolved once and cached on the entry."""
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        registry = WorktreeRegistry(tmp_path / "registry.json")
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(wt),
+        )
+        registry.add(entry)
+
+        git = MockGitBackend(open_prs={"feat": 10}, remote_branches={"feat"})
+        with patch(
+            "superintendent.cli.main._get_github_url",
+            return_value="https://github.com/owner/repo",
+        ):
+            get_git_status_tags(entry, git, registry=registry)
+
+        reloaded = registry.get("test")
+        assert reloaded is not None
+        assert reloaded.github_url == "https://github.com/owner/repo"
+
+    def test_cached_github_url_reused(self, tmp_path: Path):
+        """When github_url is already cached, _get_github_url is not called."""
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        entry = WorktreeEntry(
+            name="test",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(wt),
+            github_url="https://github.com/cached/repo",
+        )
+        git = MockGitBackend(open_prs={"feat": 7}, remote_branches={"feat"})
+        with patch(
+            "superintendent.cli.main._get_github_url",
+        ) as mock_get_url:
+            tags = get_git_status_tags(entry, git)
+            mock_get_url.assert_not_called()
+        # PR tag should contain #7 (hyperlink formatting depends on TTY)
+        pr_tag = [t for t in tags if "PR" in t][0]
+        assert "#7" in pr_tag
+
+
+class TestEntryGitInfoPassthrough:
+    def test_git_info_open_pr(self, tmp_path: Path):
+        """get_git_status_tags uses git_info param instead of calling API."""
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        entry = WorktreeEntry(
+            name="test", repo="/tmp/repo", branch="feat", worktree_path=str(wt)
+        )
+        git = MockGitBackend()  # No PR data — would return "none"
+        info = EntryGitInfo(pr_state="open", pr_number=99, has_remote=True)
+        tags = get_git_status_tags(entry, git, git_info=info)
+        assert "PR #99" in tags
+
+    def test_git_info_has_remote(self, tmp_path: Path):
+        """has_remote from git_info is used instead of remote_branch_exists."""
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        entry = WorktreeEntry(
+            name="test", repo="/tmp/repo", branch="feat", worktree_path=str(wt)
+        )
+        git = MockGitBackend()  # No remote branches set
+        info = EntryGitInfo(pr_state="none", has_remote=True)
+        tags = get_git_status_tags(entry, git, git_info=info)
+        assert "pushed" in tags
+
+
+class TestFormatStatusLineWithGitTags:
+    def test_git_tags_appended(self):
+        line = _format_status_line(
+            "my-entry", "completed", {"exit_code": "0"}, git_tags=["PR merged", "clean"]
+        )
+        assert "[PR merged, clean]" in line
+        assert "exit 0" in line
+
+    def test_no_git_tags(self):
+        line = _format_status_line(
+            "my-entry", "running", {"start_time": "2026-03-23T10:00:00Z"}
+        )
+        assert "[" not in line
+
+    def test_empty_git_tags(self):
+        line = _format_status_line("my-entry", "running", {}, git_tags=[])
+        assert "[" not in line
+
+
+class TestStatusCommandWithGitInfo:
+    @patch("superintendent.cli.main.get_git_status_tags")
+    @patch("superintendent.cli.main.check_agent_status")
+    @patch("superintendent.cli.main.get_default_registry")
+    def test_status_shows_git_tags(
+        self, mock_registry, mock_status, mock_git_tags, tmp_path: Path
+    ):
+        entry = WorktreeEntry(
+            name="my-agent",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(tmp_path),
+        )
+        mock_registry.return_value.list_all.return_value = [entry]
+        mock_status.return_value = ("completed", {"exit_code": "0", "duration": "2m"})
+        mock_git_tags.return_value = ["PR merged", "clean"]
+        result = runner.invoke(app, ["status"])
+        assert result.exit_code == 0
+        assert "PR merged" in result.output
+        assert "clean" in result.output
+
+    @patch("superintendent.cli.main.get_default_registry")
+    def test_status_missing_worktree_no_git_tags(self, mock_registry):
+        entry = WorktreeEntry(
+            name="gone",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path="/nonexistent/path",
+        )
+        mock_registry.return_value.list_all.return_value = [entry]
+        result = runner.invoke(app, ["status"])
+        assert result.exit_code == 0
+        assert "worktree missing" in result.output
+        assert "[" not in result.output
+
+
+class TestRoundTripWithGitInfo:
+    def test_register_markers_and_git_status(self, tmp_path: Path):
+        """Round-trip: register entry, write markers, check status includes lifecycle AND git info."""
+        worktree_dir = tmp_path / "worktree"
+        worktree_dir.mkdir()
+        ralph = worktree_dir / ".ralph"
+        ralph.mkdir()
+        (ralph / "agent-started").write_text("2026-03-23T10:00:00Z\n")
+        (ralph / "agent-done").write_text("2026-03-23T10:30:00Z\n")
+        (ralph / "agent-exit-code").write_text("0\n")
+
+        registry = WorktreeRegistry(tmp_path / "registry.json")
+        entry = WorktreeEntry(
+            name="agent",
+            repo="/tmp/repo",
+            branch="feat",
+            worktree_path=str(worktree_dir),
+        )
+        registry.add(entry)
+
+        entries = registry.list_all()
+        status, details = check_agent_status(entries[0])
+        assert status == "completed"
+        assert details["exit_code"] == "0"
+
+        git = MockGitBackend(
+            merged_branches={"feat"},
+            remote_branches={"feat"},
+        )
+        tags = get_git_status_tags(entries[0], git)
+        assert "PR merged" in tags
+        assert "clean" in tags
+
+        line = _format_status_line(entries[0].name, status, details, git_tags=tags)
+        assert "completed" in line
+        assert "exit 0" in line
+        assert "[PR merged, clean]" in line
 
 
 class TestRoundTrip:

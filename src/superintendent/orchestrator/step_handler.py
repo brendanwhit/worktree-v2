@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from superintendent.backends.factory import Backends
+from superintendent.backends.terminal import build_agent_command, wrap_with_lifecycle
 from superintendent.orchestrator.executor import StepResult
 from superintendent.orchestrator.models import Verbosity, WorkflowStep
 from superintendent.state.ralph import RalphState
@@ -642,8 +643,10 @@ class RealStepHandler:
                 )
         else:
             terminal = self._context.backends.terminal
-            escaped_task = task.replace("'", "'\\''")
-            cmd = f"unset CLAUDECODE && claude '{escaped_task}'"
+            cmd = build_agent_command(task, autonomous=autonomous)
+            ralph_dir = worktree_path / ".ralph"
+            if ralph_dir.is_dir():
+                cmd = wrap_with_lifecycle(cmd, ralph_dir)
             if not terminal.spawn(cmd, worktree_path):
                 return StepResult(
                     success=False,
