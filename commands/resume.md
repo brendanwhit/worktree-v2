@@ -1,20 +1,12 @@
-Resume or reattach to an existing entry and its sandbox.
-
-Run the superintendent CLI resume command:
+**Deprecated:** Use `run --branch` instead, which reuses existing worktrees
+and auto-merges stale branches.
 
 ```bash
-superintendent resume $ARGUMENTS
+# Instead of: superintendent resume --name my-branch
+superintendent run <mode> <target> --repo <repo> --task <task> --branch my-branch
 ```
 
-## Available flags
-
-- `--name NAME` (required) — Name of the entry to resume
-
-Looks up the entry in the global registry, verifies the path
-and sandbox still exist, then reattaches to the running agent.
-
-## Examples
-
-```
-/superintendent:resume --name my-repo
-```
+The `run` command now handles all resume scenarios:
+- Reuses existing worktrees when the branch already exists
+- Auto-merges main into stale branches (disable with `--no-merge`)
+- Use `--force` to recreate from scratch

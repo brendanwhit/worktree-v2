@@ -165,7 +165,7 @@ superintendent/
 │   ├── spawn.md
 │   ├── ralph.md
 │   ├── list.md
-│   ├── resume.md
+│   ├── resume.md        # Deprecated — points to run --branch
 │   └── cleanup.md
 ├── src/
 │   └── superintendent/
