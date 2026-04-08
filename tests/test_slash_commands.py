@@ -8,7 +8,7 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 COMMANDS_DIR = PROJECT_ROOT / "commands"
 
-EXPECTED_COMMANDS = ["ralph", "spawn", "list", "resume", "cleanup"]
+EXPECTED_COMMANDS = ["ralph", "spawn", "list", "cleanup"]
 
 
 class TestCommandFilesExist:
@@ -50,28 +50,15 @@ class TestCommandFileContent:
         assert "superintendent" in content or "sup" in content
         assert "list" in content.lower()
 
-    def test_resume_references_cli(self) -> None:
-        content = (COMMANDS_DIR / "resume.md").read_text()
-        assert "superintendent" in content or "sup" in content
-        assert "resume" in content.lower()
-
     def test_cleanup_references_cli(self) -> None:
         content = (COMMANDS_DIR / "cleanup.md").read_text()
         assert "superintendent" in content or "sup" in content
         assert "cleanup" in content.lower()
 
-    @pytest.mark.parametrize(
-        "cmd_name", [c for c in EXPECTED_COMMANDS if c != "resume"]
-    )
+    @pytest.mark.parametrize("cmd_name", EXPECTED_COMMANDS)
     def test_command_uses_arguments_placeholder(self, cmd_name: str) -> None:
         """Each command should reference $ARGUMENTS for user input."""
         content = (COMMANDS_DIR / f"{cmd_name}.md").read_text()
         assert "$ARGUMENTS" in content, (
             f"{cmd_name}.md should use $ARGUMENTS placeholder"
         )
-
-    def test_resume_is_deprecated(self) -> None:
-        """resume.md should be a deprecation notice pointing to run --branch."""
-        content = (COMMANDS_DIR / "resume.md").read_text()
-        assert "deprecated" in content.lower()
-        assert "run --branch" in content

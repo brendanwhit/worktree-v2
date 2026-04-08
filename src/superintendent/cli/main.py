@@ -21,7 +21,7 @@ import typer
 
 from superintendent import __version__
 from superintendent.backends.factory import BackendMode, create_backends
-from superintendent.backends.git import DEFAULT_STALE_DAYS, GitBackend, RealGitBackend
+from superintendent.backends.git import GitBackend, RealGitBackend
 from superintendent.orchestrator.executor import Executor
 from superintendent.orchestrator.models import Mode, Target, Verbosity, WorkflowStep
 from superintendent.orchestrator.planner import Planner, PlannerInput
@@ -29,7 +29,6 @@ from superintendent.orchestrator.repo_info import RepoInfo
 from superintendent.orchestrator.step_handler import (
     ExecutionContext,
     RealStepHandler,
-    default_worktrees_dir,
 )
 from superintendent.orchestrator.strategy import ExecutionStrategy, TaskInfo
 from superintendent.state.registry import WorktreeEntry, WorktreeRegistry
@@ -101,117 +100,6 @@ def _extract_repo_name(repo: str) -> str:
     if name.endswith(".git"):
         name = name[:-4]
     return name
-
-
-def resume_entry(
-    name: str,
-    registry: WorktreeRegistry,
-) -> WorktreeEntry | None:
-    """Look up an entry by name or branch and verify it still exists.
-
-    Tries name lookup first, then falls back to branch lookup.
-    Returns the entry if found and its worktree_path exists, else None.
-    """
-    # Try by name first
-    entry = registry.get(name)
-    if entry is None:
-        # Fall back to branch lookup
-        entry = registry.get_by_branch(name)
-    if entry is None:
-        return None
-    if not Path(entry.worktree_path).exists():
-        return None
-    return entry
-
-
-def auto_create_worktree(
-    branch: str,
-    repo: str,
-    registry: WorktreeRegistry,
-    git_backend: GitBackend,
-) -> WorktreeEntry | None:
-    """Auto-create a worktree for an existing branch.
-
-    If the branch exists in the repo, creates a worktree at the standard
-    location (~/.claude-worktrees/<repo>/<branch-slug>), registers it,
-    and returns the entry. Returns None if the branch doesn't exist or
-    worktree creation fails.
-    """
-    # Resolve repo to a local path
-    repo_path = git_backend.ensure_local(repo)
-    if repo_path is None:
-        return None
-
-    if not git_backend.branch_exists(repo_path, branch):
-        return None
-
-    repo_name = _extract_repo_name(repo)
-    slug = _branch_to_slug(branch)
-    worktree_path = default_worktrees_dir() / repo_name / slug
-
-    if worktree_path.exists():
-        # Worktree directory already exists — just register it
-        entry = WorktreeEntry(
-            name=slug,
-            repo=repo,
-            branch=branch,
-            worktree_path=str(worktree_path),
-        )
-        registry.add(entry)
-        return entry
-
-    if not git_backend.create_worktree_from_existing(repo_path, branch, worktree_path):
-        return None
-
-    entry = WorktreeEntry(
-        name=slug,
-        repo=repo,
-        branch=branch,
-        worktree_path=str(worktree_path),
-    )
-    registry.add(entry)
-    return entry
-
-
-def check_and_merge_stale(
-    entry: WorktreeEntry,
-    git_backend: GitBackend,
-    stale_days: float = DEFAULT_STALE_DAYS,
-) -> str | None:
-    """Check if a branch is stale and merge main if so.
-
-    Returns a status message describing what happened, or None if
-    the branch is not stale.
-    """
-    worktree_path = Path(entry.worktree_path)
-    if not worktree_path.exists():
-        return None
-
-    age = git_backend.get_branch_age_days(worktree_path, entry.branch)
-    if age is None:
-        return None
-
-    if age < stale_days:
-        return None
-
-    # Branch is stale — try to merge the default branch
-    age_str = f"{age:.0f}"
-    if not git_backend.fetch(worktree_path):
-        return f"Branch '{entry.branch}' is {age_str} days stale, but fetch failed"
-
-    default_branch = git_backend.get_default_branch(worktree_path)
-    remote_ref = f"origin/{default_branch}"
-
-    if git_backend.merge_branch(worktree_path, remote_ref):
-        return (
-            f"Branch '{entry.branch}' was {age_str} days stale; "
-            f"merged {default_branch} successfully"
-        )
-    else:
-        return (
-            f"Branch '{entry.branch}' is {age_str} days stale; "
-            f"merge from {default_branch} had conflicts (auto-aborted)"
-        )
 
 
 def cleanup_by_name(
@@ -566,62 +454,6 @@ def list_cmd() -> None:
                 f"  {entry.name}: {entry.repo} [{entry.branch}]"
                 f" {entry.worktree_path}{sandbox_info}"
             )
-
-
-@app.command(deprecated=True)
-def resume(
-    name: str = typer.Option(..., help="Name or branch of the entry to resume."),
-    repo: str | None = typer.Option(
-        None, help="Repository path/URL (enables auto-create worktree for branches)."
-    ),
-    no_merge: bool = typer.Option(
-        False, "--no-merge", help="Skip auto-merging main into stale branches."
-    ),
-) -> None:
-    """Resume an existing entry. (Deprecated: use 'run --branch' instead.)"""
-    typer.echo(
-        "Warning: 'resume' is deprecated. Use 'run --branch <branch>' instead, "
-        "which now reuses existing worktrees and auto-merges stale branches.",
-        err=True,
-    )
-
-    registry = get_default_registry()
-    entry = resume_entry(name, registry)
-
-    # Auto-create worktree if not found in registry but repo is provided
-    if entry is None and repo is not None:
-        git_backend = RealGitBackend()
-        entry = auto_create_worktree(name, repo, registry, git_backend)
-        if entry is not None:
-            typer.echo(f"Auto-created worktree for branch '{name}'")
-
-    if entry is None:
-        typer.echo(
-            f"Error: no entry found for '{name}' (searched by name and branch)",
-            err=True,
-        )
-        if repo is not None:
-            typer.echo(
-                f"Branch '{name}' not found in repo '{repo}'",
-                err=True,
-            )
-        # List available entries as a hint
-        all_entries = registry.list_all()
-        if all_entries:
-            typer.echo("Available entries:", err=True)
-            for e in all_entries:
-                typer.echo(f"  {e.name} [{e.branch}]", err=True)
-        raise typer.Exit(code=1)
-
-    # Check for stale branch and auto-merge main
-    if not no_merge:
-        git_backend = RealGitBackend()
-        merge_msg = check_and_merge_stale(entry, git_backend)
-        if merge_msg:
-            typer.echo(merge_msg)
-
-    sandbox_info = f" (sandbox: {entry.sandbox_name})" if entry.sandbox_name else ""
-    typer.echo(f"Resuming: {entry.name} at {entry.worktree_path}{sandbox_info}")
 
 
 @app.command()
