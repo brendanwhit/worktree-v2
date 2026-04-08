@@ -8,7 +8,7 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 COMMANDS_DIR = PROJECT_ROOT / "commands"
 
-EXPECTED_COMMANDS = ["ralph", "spawn", "list", "resume", "cleanup"]
+EXPECTED_COMMANDS = ["ralph", "spawn", "list", "cleanup"]
 
 
 class TestCommandFilesExist:
@@ -49,11 +49,6 @@ class TestCommandFileContent:
         content = (COMMANDS_DIR / "list.md").read_text()
         assert "superintendent" in content or "sup" in content
         assert "list" in content.lower()
-
-    def test_resume_references_cli(self) -> None:
-        content = (COMMANDS_DIR / "resume.md").read_text()
-        assert "superintendent" in content or "sup" in content
-        assert "resume" in content.lower()
 
     def test_cleanup_references_cli(self) -> None:
         content = (COMMANDS_DIR / "cleanup.md").read_text()

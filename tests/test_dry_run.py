@@ -500,8 +500,12 @@ class TestDryRunCommandContent:
         checkout_cmds = [c for c in git.commands if "checkout -b feature-branch" in c]
         assert len(checkout_cmds) == 1
 
-    def test_git_worktree_command_format_local(self) -> None:
+    def test_git_worktree_command_format_local(self, tmp_path, monkeypatch) -> None:
         """Local target uses regular worktree add command."""
+        monkeypatch.setattr(
+            "superintendent.orchestrator.step_handler.default_worktrees_dir",
+            lambda: tmp_path / "worktrees",
+        )
         backends = _dryrun_backends()
         ctx = ExecutionContext(backends=backends, dry_run=True)
         handler = RealStepHandler(ctx)
@@ -519,10 +523,9 @@ class TestDryRunCommandContent:
 
         git = backends.git
         assert isinstance(git, DryRunGitBackend)
-        worktree_cmds = [c for c in git.commands if "worktree" in c]
+        worktree_cmds = [c for c in git.commands if "worktree add" in c]
         assert len(worktree_cmds) == 1
         assert "feature-branch" in worktree_cmds[0]
-        assert "worktree add" in worktree_cmds[0]
 
     def test_docker_create_command_includes_workspace(self) -> None:
         """Docker create command includes workspace path as positional arg."""

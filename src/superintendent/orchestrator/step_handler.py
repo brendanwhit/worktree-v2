@@ -171,13 +171,28 @@ class RealStepHandler:
         branch = step.params["branch"]
         repo_name = step.params["repo_name"]
         standalone = step.params.get("standalone", False)
+        force = step.params.get("force", False)
         slug = branch.replace("/", "-")
         worktree_path = default_worktrees_dir() / repo_name / slug
         worktree_path.parent.mkdir(parents=True, exist_ok=True)
 
+        reused = False
         if standalone:
             ok = git.clone_for_sandbox(repo_path, worktree_path, branch)
+        elif force and worktree_path.exists():
+            # --force: remove existing worktree and recreate from scratch
+            git.remove_worktree(repo_path, worktree_path)
+            ok = git.create_worktree(repo_path, branch, worktree_path)
+        elif worktree_path.exists() and git.branch_exists(repo_path, branch):
+            # Scenario 1: worktree + branch already exist — reuse
+            ok = True
+            reused = True
+        elif git.branch_exists(repo_path, branch):
+            # Scenario 2: branch exists but no worktree — attach
+            ok = git.create_worktree_from_existing(repo_path, branch, worktree_path)
+            reused = True
         else:
+            # Scenario 3: neither exists — create new branch + worktree
             ok = git.create_worktree(repo_path, branch, worktree_path)
 
         if not ok:
@@ -188,10 +203,46 @@ class RealStepHandler:
                 message=f"Failed to {action} at {worktree_path}",
             )
 
+        # When reusing an existing branch, merge main if the branch is stale
+        merge_message = None
+        no_merge = step.params.get("no_merge", False)
+        if reused and not no_merge:
+            merge_message = self._merge_stale_branch(git, worktree_path, branch)
+
         return StepResult(
             success=True,
             step_id=step.id,
-            data={"worktree_path": str(worktree_path)},
+            data={
+                "worktree_path": str(worktree_path),
+                "reused": reused,
+                "merge_message": merge_message,
+            },
+        )
+
+    @staticmethod
+    def _merge_stale_branch(
+        git: Any, worktree_path: "Path", branch: str, stale_days: float = 7
+    ) -> str | None:
+        """Merge main into a stale branch. Returns a status message or None."""
+        age = git.get_branch_age_days(worktree_path, branch)
+        if age is None or age < stale_days:
+            return None
+
+        age_str = f"{age:.0f}"
+        if not git.fetch(worktree_path):
+            return f"Branch '{branch}' is {age_str} days stale, but fetch failed"
+
+        default_branch = git.get_default_branch(worktree_path)
+        remote_ref = f"origin/{default_branch}"
+
+        if git.merge_branch(worktree_path, remote_ref):
+            return (
+                f"Branch '{branch}' was {age_str} days stale; "
+                f"merged {default_branch} successfully"
+            )
+        return (
+            f"Branch '{branch}' is {age_str} days stale; "
+            f"merge from {default_branch} had conflicts (auto-aborted)"
         )
 
     # -- Template handler (prepare_template) ----------------------------------
