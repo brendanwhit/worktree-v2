@@ -171,7 +171,7 @@ These rules apply when running as an unsupervised autonomous agent (e.g. Ralph i
 
 ## Key Files
 
-- `src/superintendent/cli/main.py` - Typer CLI with run/list/cleanup commands (resume is deprecated)
+- `src/superintendent/cli/main.py` - Typer CLI with run/list/cleanup commands
 - `src/superintendent/orchestrator/models.py` - WorkflowStep, WorkflowPlan, Mode, Target
 - `src/superintendent/orchestrator/planner.py` - Creates WorkflowPlan from PlannerInput
 - `src/superintendent/orchestrator/executor.py` - Runs plan through state machine

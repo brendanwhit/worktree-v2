@@ -1,9 +1,8 @@
 """Superintendent CLI for agent orchestration.
 
 Subcommands:
-    run       — Create a workspace and spawn an agent
+    run       — Create a workspace and spawn an agent (reuses existing worktrees)
     list      — List all active entries
-    resume    — Resume an existing entry
     cleanup   — Remove stale entries
     token     — Manage scoped GitHub tokens
 """
