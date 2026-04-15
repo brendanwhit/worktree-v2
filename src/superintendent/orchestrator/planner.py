@@ -19,6 +19,7 @@ class PlannerInput:
     context_file: str | None = None
     sandbox_name: str | None = None
     force: bool = False
+    no_merge: bool = False
 
 
 class Planner:
@@ -99,6 +100,8 @@ class Planner:
                 params={
                     "branch": metadata["branch"],
                     "repo_name": metadata["repo_name"],
+                    "force": inputs.force,
+                    "no_merge": inputs.no_merge,
                 },
                 depends_on=["validate_repo"],
             )

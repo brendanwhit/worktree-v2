@@ -165,7 +165,6 @@ superintendent/
 │   ├── spawn.md
 │   ├── ralph.md
 │   ├── list.md
-│   ├── resume.md
 │   └── cleanup.md
 ├── src/
 │   └── superintendent/

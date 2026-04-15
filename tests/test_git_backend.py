@@ -704,6 +704,132 @@ class TestRealGitBackend:
         )
         assert wt_path2.exists()
 
+    @pytest.mark.integration
+    def test_remove_worktree(self, tmp_path):
+        """Integration test: remove_worktree deletes directory and unregisters."""
+        import subprocess
+
+        repo_path = tmp_path / "repo"
+        subprocess.run(["git", "init", str(repo_path)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(repo_path), "config", "user.email", "test@test.com"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_path), "config", "user.name", "Test"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_path), "commit", "--allow-empty", "-m", "init"],
+            check=True,
+            capture_output=True,
+        )
+
+        backend = RealGitBackend()
+        wt_path = tmp_path / "wt"
+        backend.create_worktree(repo_path, "feature-branch", wt_path)
+        assert wt_path.exists()
+
+        result = backend.remove_worktree(repo_path, wt_path)
+        assert result is True
+        assert not wt_path.exists()
+        # Verify it's no longer in git's worktree list
+        worktrees = backend.list_worktrees(repo_path)
+        wt_paths = [wt.path for wt in worktrees]
+        assert wt_path.resolve() not in [p.resolve() for p in wt_paths]
+
+    @pytest.mark.integration
+    def test_worktree_reuse_scenario_branch_and_worktree_exist(self, tmp_path):
+        """Integration test: when worktree + branch exist, reuse is safe.
+
+        Verifies that the worktree path and branch are both valid after
+        a previous create_worktree, confirming the reuse scenario works
+        with real git state.
+        """
+        import subprocess
+
+        repo_path = tmp_path / "repo"
+        subprocess.run(["git", "init", str(repo_path)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(repo_path), "config", "user.email", "test@test.com"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_path), "config", "user.name", "Test"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_path), "commit", "--allow-empty", "-m", "init"],
+            check=True,
+            capture_output=True,
+        )
+
+        backend = RealGitBackend()
+        wt_path = tmp_path / "wt"
+        backend.create_worktree(repo_path, "feature-branch", wt_path)
+
+        # Both should be true — this is the reuse precondition
+        assert wt_path.exists()
+        assert backend.branch_exists(repo_path, "feature-branch")
+        # Worktree is a valid git checkout
+        status = subprocess.run(
+            ["git", "-C", str(wt_path), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+        )
+        assert status.returncode == 0
+
+    @pytest.mark.integration
+    def test_worktree_reuse_scenario_force_remove_and_recreate(self, tmp_path):
+        """Integration test: remove_worktree + create_worktree round-trips cleanly.
+
+        Verifies the --force path: remove existing worktree, then create a
+        fresh one at the same path with the same branch name.
+        """
+        import subprocess
+
+        repo_path = tmp_path / "repo"
+        subprocess.run(["git", "init", str(repo_path)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(repo_path), "config", "user.email", "test@test.com"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_path), "config", "user.name", "Test"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_path), "commit", "--allow-empty", "-m", "init"],
+            check=True,
+            capture_output=True,
+        )
+
+        backend = RealGitBackend()
+        wt_path = tmp_path / "wt"
+
+        # Create, remove, recreate
+        backend.create_worktree(repo_path, "feature-branch", wt_path)
+        assert wt_path.exists()
+
+        backend.remove_worktree(repo_path, wt_path)
+        assert not wt_path.exists()
+
+        # Branch still exists after worktree removal (git keeps it)
+        assert backend.branch_exists(repo_path, "feature-branch")
+
+        # Recreate: need create_worktree_from_existing since branch exists
+        result = backend.create_worktree_from_existing(
+            repo_path, "feature-branch", wt_path
+        )
+        assert result is True
+        assert wt_path.exists()
+
 
 class TestHelperFunctions:
     """Test helper functions used by RealGitBackend."""
