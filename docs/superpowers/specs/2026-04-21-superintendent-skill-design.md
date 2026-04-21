@@ -153,11 +153,14 @@ class CommandSpec:
 class CommandGroup:
     name: str                # "superintendent" or subgroup name
     help: str
+    flags: tuple[FlagSpec, ...]        # group-level options (e.g., --version from @app.callback)
     commands: tuple[CommandSpec, ...]
     subgroups: tuple["CommandGroup", ...]
 ```
 
 Tuples (not lists) for hashability and for guaranteed iteration order in rendered output.
+
+The `flags` field on `CommandGroup` holds options defined on the group itself rather than on any single command — specifically the root `@app.callback()`'s `--version` flag, and any future group-level flags we add. Without this field there would be no place for root options to live, and they would silently disappear from the generated reference.
 
 ### `src/superintendent/docs/introspect.py`
 
@@ -167,11 +170,11 @@ Single public function:
 def walk(app: typer.Typer) -> CommandGroup:
     """Walk a typer app recursively, returning a CommandGroup tree.
 
-    Uses typer internals:
-    - app.registered_commands for direct commands
-    - app.registered_groups for subgroups added via app.add_typer(...)
-    - For each command, reads the underlying click.Command via
-      typer.main.get_command_from_info() to extract Argument/Option params.
+    Implementation goes through click (more stable surface than typer internals):
+    - Call typer.main.get_command(app) to get the underlying click.Group
+    - Walk group.commands.items() for subcommands; recursively for nested groups
+    - For each click.Command, read .params to extract Arguments and Options
+    - Read group.params for group-level flags (e.g., root --version)
 
     Deterministic ordering: commands sorted by name within each group,
     flags sorted by primary name, arguments preserved in declaration order.
@@ -235,7 +238,16 @@ def install_skill(
     """Install the superintendent skill to a user-level Claude Code skills directory."""
 ```
 
-Reads the three files from the packaged resources via `importlib.resources.files("superintendent.docs.assets.skills.superintendent")`, writes to `target`. Idempotent when `force=True`; errors if target exists and `force=False`.
+Reads the three files from the packaged resources via path-style traversal:
+
+```python
+from importlib.resources import files
+skill_dir = files("superintendent.docs") / "assets" / "skills" / "superintendent"
+for name in ("SKILL.md", "CLI_REFERENCE.md", "cli-reference.json"):
+    (target / name).write_text((skill_dir / name).read_text())
+```
+
+Path-style traversal works whether or not `assets/`, `skills/`, and `superintendent/` contain `__init__.py` files. Since none of them need to be Python packages (they hold only data), we deliberately do NOT add `__init__.py` to those subdirectories. Only `superintendent/docs/` itself is a package. Idempotent when `force=True`; errors if target exists and `force=False`.
 
 ### Hand-written `SKILL.md` (canonical content)
 
@@ -373,6 +385,7 @@ No new workflow. The existing `test` job in `.github/workflows/ci.yml` runs `pyt
 - `.claude/skills/superintendent/` symlink to canonical location
 - `tests/test_cli_reference.py` with byte-diff + structural assertions
 - Unit tests for `introspect.walk` and renderer determinism
+- `test_plugin_manifest_version_matches_pyproject` — asserts `.claude-plugin/plugin.json` `version` equals `pyproject.toml` `version`, mirroring the existing `version-check.yml` discipline between `pyproject.toml` and `__init__.py`
 - README section documenting `install-skill` and plugin install paths
 
 ### Out of scope (explicit non-goals)
@@ -395,6 +408,8 @@ No new workflow. The existing `test` job in `.github/workflows/ci.yml` runs `pyt
 | `test_walk_handles_optional_flag` | `Optional[str]` defaults render as `None` |
 | `test_walk_handles_prompt_flag` | Prompt-style options render default as `<prompt>` |
 | `test_walk_handles_nested_subgroup` | `app.add_typer(sub)` is recursed into |
+| `test_walk_captures_root_callback_flags` | Options defined on `@app.callback()` (e.g., `--version`) surface on `CommandGroup.flags` and are not silently dropped |
+| `test_plugin_manifest_version_matches_pyproject` | `.claude-plugin/plugin.json` `version` field equals `pyproject.toml` `version` |
 | `test_render_json_is_deterministic` | Two runs produce byte-identical output |
 | `test_render_markdown_is_deterministic` | Same for markdown |
 | `test_install_skill_writes_files` | `install-skill --target <tempdir>` writes three files with correct content |
@@ -422,14 +437,14 @@ The writing-plans skill will produce the actual plan; this section is a hint for
 
 ## Risks and Open Questions
 
-- **Typer internals may change.** `app.registered_commands` and `app.registered_groups` are public-ish but not guaranteed stable across typer versions. Mitigation: the structural assertion tests catch silent breakage (e.g., `run` command missing from the tree). If typer API churn becomes painful, we could switch to `typer.main.get_command(app)` to get the underlying `click.Group` and walk click's more stable API.
+- **Click API surface.** The walker goes through `typer.main.get_command(app)` → `click.Group`, walking `.commands` and each command's `.params`. Click's API is more stable than typer internals, but not immutable. Mitigation: structural assertion tests (`test_introspection_covers_all_top_level_commands`, `test_run_command_has_required_repo_and_task_flags`, `test_walk_captures_root_callback_flags`) catch silent breakage — if a future typer/click upgrade changes how parameters are exposed, at least one assertion fires.
 
-- **Click Context vs. typer callback.** The root `@app.callback()` defines a `--version` option that lives on the group, not on any single command. The walker must surface this as a "root flag" section in the output, not silently drop it.
+- **Click Context vs. typer callback.** The root `@app.callback()` defines a `--version` option that lives on the group, not on any single command. The data model handles this via `CommandGroup.flags`; the walker reads these from the click.Group's `.params` after `typer.main.get_command(app)`. Covered by `test_walk_captures_root_callback_flags` so a silent typer API change surfaces as a test failure.
 
 - **Symlinks in git.** The `.claude/skills/superintendent/` symlink must be committed as a symlink, not a directory copy. Needs a smoke test: `git ls-files -s .claude/skills/superintendent` should show mode `120000`. If someone accidentally commits it as a directory copy, drift is silently possible. Adding a CI check (`test -L .claude/skills/superintendent`) is cheap insurance — consider adding to the `lint` job.
 
-- **Resource loading in the wheel.** `importlib.resources.files("superintendent.docs.assets.skills.superintendent")` needs the directory to exist as a proper package (with `__init__.py`) or we must use the namespace-package-friendly `files()` API with path-style access. The implementation will need to verify which form works cleanly with hatchling's wheel output.
+- **Resource loading in the wheel.** Resolved: use path-style traversal (`files("superintendent.docs") / "assets" / ...`) so no `__init__.py` is needed under `assets/`. Only `superintendent/docs/` itself remains a Python package. Hatchling's wheel output includes non-Python files under `src/superintendent/` as package data automatically, so no additional `force-include` is required. See Components §`install-skill` for the exact snippet.
 
 - **Version bumping.** Per project convention, every PR bumps the version in both `pyproject.toml` and `src/superintendent/__init__.py`. This spec introduces a new CLI subcommand (`docs`, `install-skill`), which is a minor bump (0.3.0 → 0.4.0).
 
-- **Plugin manifest version drift.** `plugin.json` includes a `version` field that duplicates `pyproject.toml`. A small test or CI check should assert they match, similar to the existing `version-check.yml` workflow.
+- **Plugin manifest version drift.** Caught by `test_plugin_manifest_version_matches_pyproject` (see Scope § In scope). Mirrors the existing `version-check.yml` discipline between `pyproject.toml` and `__init__.py`.
