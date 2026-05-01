@@ -1,0 +1,438 @@
+{
+  "commands": [
+    {
+      "arguments": [],
+      "flags": [
+        {
+          "aliases": [],
+          "default": "False",
+          "help": "Clean up all stale entries.",
+          "is_bool": true,
+          "name": "--all",
+          "required": false,
+          "type_repr": "bool"
+        },
+        {
+          "aliases": [],
+          "default": "False",
+          "help": "Show what would be removed.",
+          "is_bool": true,
+          "name": "--dry-run",
+          "required": false,
+          "type_repr": "bool"
+        },
+        {
+          "aliases": [],
+          "default": "False",
+          "help": "Force removal of entries with local-only work.",
+          "is_bool": true,
+          "name": "--force",
+          "required": false,
+          "type_repr": "bool"
+        },
+        {
+          "aliases": [],
+          "default": "None",
+          "help": "Remove a specific entry by name.",
+          "is_bool": false,
+          "name": "--name",
+          "required": false,
+          "type_repr": "str"
+        },
+        {
+          "aliases": [],
+          "default": "False",
+          "help": "Use smart cleanup (check PRs, staleness, remotes).",
+          "is_bool": true,
+          "name": "--smart",
+          "required": false,
+          "type_repr": "bool"
+        },
+        {
+          "aliases": [],
+          "default": "30",
+          "help": "Days without commits before a branch is stale.",
+          "is_bool": false,
+          "name": "--stale-days",
+          "required": false,
+          "type_repr": "int"
+        }
+      ],
+      "help": "Remove stale entries from the registry.",
+      "name": "cleanup"
+    },
+    {
+      "arguments": [],
+      "flags": [
+        {
+          "aliases": [],
+          "default": "False",
+          "help": "Overwrite existing files.",
+          "is_bool": true,
+          "name": "--force",
+          "required": false,
+          "type_repr": "bool"
+        },
+        {
+          "aliases": [],
+          "default": "None",
+          "help": "Target directory (defaults to ~/.claude/skills/superintendent).",
+          "is_bool": false,
+          "name": "--target",
+          "required": false,
+          "type_repr": "path"
+        }
+      ],
+      "help": "Install the superintendent skill to a Claude Code skills directory.",
+      "name": "install-skill"
+    },
+    {
+      "arguments": [],
+      "flags": [],
+      "help": "List all active entries.",
+      "name": "list"
+    },
+    {
+      "arguments": [
+        {
+          "choices": [
+            "interactive",
+            "autonomous"
+          ],
+          "help": "Interaction mode: interactive or autonomous",
+          "name": "mode",
+          "type_repr": "enum[interactive|autonomous]"
+        },
+        {
+          "choices": [
+            "sandbox",
+            "container",
+            "local"
+          ],
+          "help": "Execution target: sandbox, container, or local",
+          "name": "target",
+          "type_repr": "enum[sandbox|container|local]"
+        }
+      ],
+      "flags": [
+        {
+          "aliases": [],
+          "default": "None",
+          "help": "Git branch name for the worktree.",
+          "is_bool": false,
+          "name": "--branch",
+          "required": false,
+          "type_repr": "str"
+        },
+        {
+          "aliases": [],
+          "default": "None",
+          "help": "Path to a context file for the agent.",
+          "is_bool": false,
+          "name": "--context-file",
+          "required": false,
+          "type_repr": "str"
+        },
+        {
+          "aliases": [],
+          "default": "False",
+          "help": "Required for autonomous + local (no sandbox isolation).",
+          "is_bool": true,
+          "name": "--dangerously-skip-isolation",
+          "required": false,
+          "type_repr": "bool"
+        },
+        {
+          "aliases": [],
+          "default": "False",
+          "help": "Show the plan without executing.",
+          "is_bool": true,
+          "name": "--dry-run",
+          "required": false,
+          "type_repr": "bool"
+        },
+        {
+          "aliases": [],
+          "default": "False",
+          "help": "Show what would happen without executing.",
+          "is_bool": true,
+          "name": "--explain",
+          "required": false,
+          "type_repr": "bool"
+        },
+        {
+          "aliases": [
+            "--no-force"
+          ],
+          "default": "False",
+          "help": "Force recreation of existing sandbox/worktree.",
+          "is_bool": true,
+          "name": "--force",
+          "required": false,
+          "type_repr": "bool"
+        },
+        {
+          "aliases": [],
+          "default": "False",
+          "help": "Skip auto-merging main into stale branches when reusing worktrees.",
+          "is_bool": true,
+          "name": "--no-merge",
+          "required": false,
+          "type_repr": "bool"
+        },
+        {
+          "aliases": [
+            "-q"
+          ],
+          "default": "False",
+          "help": "Suppress non-error output.",
+          "is_bool": true,
+          "name": "--quiet",
+          "required": false,
+          "type_repr": "bool"
+        },
+        {
+          "aliases": [],
+          "default": "None",
+          "help": "Path or URL to the repository.",
+          "is_bool": false,
+          "name": "--repo",
+          "required": true,
+          "type_repr": "str"
+        },
+        {
+          "aliases": [],
+          "default": "None",
+          "help": "Custom name for the Docker sandbox.",
+          "is_bool": false,
+          "name": "--sandbox-name",
+          "required": false,
+          "type_repr": "str"
+        },
+        {
+          "aliases": [],
+          "default": "None",
+          "help": "Task description for the agent.",
+          "is_bool": false,
+          "name": "--task",
+          "required": true,
+          "type_repr": "str"
+        },
+        {
+          "aliases": [],
+          "default": "None",
+          "help": "Custom Dockerfile template.",
+          "is_bool": false,
+          "name": "--template-dockerfile",
+          "required": false,
+          "type_repr": "str"
+        },
+        {
+          "aliases": [
+            "-v"
+          ],
+          "default": "False",
+          "help": "Show detailed progress and backend commands.",
+          "is_bool": true,
+          "name": "--verbose",
+          "required": false,
+          "type_repr": "bool"
+        }
+      ],
+      "help": "Create a workspace and spawn an agent.",
+      "name": "run"
+    },
+    {
+      "arguments": [],
+      "flags": [
+        {
+          "aliases": [],
+          "default": "None",
+          "help": "Filter by entry name.",
+          "is_bool": false,
+          "name": "--name",
+          "required": false,
+          "type_repr": "str"
+        }
+      ],
+      "help": "Show agent lifecycle status for registered entries.",
+      "name": "status"
+    }
+  ],
+  "flags": [
+    {
+      "aliases": [],
+      "default": "None",
+      "help": "Install completion for the current shell.",
+      "is_bool": true,
+      "name": "--install-completion",
+      "required": false,
+      "type_repr": "bool"
+    },
+    {
+      "aliases": [],
+      "default": "None",
+      "help": "Show completion for the current shell, to copy it or customize the installation.",
+      "is_bool": true,
+      "name": "--show-completion",
+      "required": false,
+      "type_repr": "bool"
+    },
+    {
+      "aliases": [
+        "-V"
+      ],
+      "default": "False",
+      "help": "Show version and exit.",
+      "is_bool": true,
+      "name": "--version",
+      "required": false,
+      "type_repr": "bool"
+    }
+  ],
+  "help": "Agent orchestration CLI for spawning autonomous Claude agents.",
+  "name": "superintendent",
+  "subgroups": [
+    {
+      "commands": [
+        {
+          "arguments": [],
+          "flags": [
+            {
+              "aliases": [],
+              "default": "False",
+              "help": "Show diff without writing.",
+              "is_bool": true,
+              "name": "--check",
+              "required": false,
+              "type_repr": "bool"
+            }
+          ],
+          "help": "Regenerate CLI_REFERENCE.md and cli-reference.json from the live CLI.",
+          "name": "regenerate"
+        }
+      ],
+      "flags": [],
+      "help": "Generate and inspect CLI reference docs.",
+      "name": "docs",
+      "subgroups": []
+    },
+    {
+      "commands": [
+        {
+          "arguments": [
+            {
+              "choices": null,
+              "help": "Repository in owner/repo format.",
+              "name": "repo",
+              "type_repr": "str"
+            }
+          ],
+          "flags": [
+            {
+              "aliases": [
+                "-p"
+              ],
+              "default": "None",
+              "help": "Token permission scopes.",
+              "is_bool": false,
+              "name": "--permission",
+              "required": false,
+              "type_repr": "str"
+            },
+            {
+              "aliases": [],
+              "default": "<prompt>",
+              "help": "GitHub token.",
+              "is_bool": false,
+              "name": "--token",
+              "required": true,
+              "type_repr": "str"
+            }
+          ],
+          "help": "Add a GitHub token for a repository.",
+          "name": "add"
+        },
+        {
+          "arguments": [
+            {
+              "choices": null,
+              "help": "Repository in owner/repo format.",
+              "name": "repo",
+              "type_repr": "str"
+            }
+          ],
+          "flags": [],
+          "help": "Remove a GitHub token for a repository.",
+          "name": "remove"
+        },
+        {
+          "arguments": [],
+          "flags": [],
+          "help": "Remove the default personal GitHub token.",
+          "name": "remove-default"
+        },
+        {
+          "arguments": [],
+          "flags": [
+            {
+              "aliases": [],
+              "default": "<prompt>",
+              "help": "GitHub token.",
+              "is_bool": false,
+              "name": "--token",
+              "required": true,
+              "type_repr": "str"
+            }
+          ],
+          "help": "Set the default personal GitHub token.\n\nValidates the token by calling `gh api user` and stores the\nassociated GitHub username for owner-based resolution.",
+          "name": "set-default"
+        },
+        {
+          "arguments": [],
+          "flags": [],
+          "help": "Show all stored tokens with metadata.",
+          "name": "status"
+        },
+        {
+          "arguments": [
+            {
+              "choices": null,
+              "help": "Repository in owner/repo format.",
+              "name": "repo",
+              "type_repr": "str"
+            }
+          ],
+          "flags": [
+            {
+              "aliases": [
+                "-p"
+              ],
+              "default": "None",
+              "help": "Token permission scopes.",
+              "is_bool": false,
+              "name": "--permission",
+              "required": false,
+              "type_repr": "str"
+            },
+            {
+              "aliases": [],
+              "default": "<prompt>",
+              "help": "New GitHub token.",
+              "is_bool": false,
+              "name": "--token",
+              "required": true,
+              "type_repr": "str"
+            }
+          ],
+          "help": "Update an existing GitHub token for a repository.",
+          "name": "update"
+        }
+      ],
+      "flags": [],
+      "help": "Manage scoped GitHub tokens.",
+      "name": "token",
+      "subgroups": []
+    }
+  ]
+}
