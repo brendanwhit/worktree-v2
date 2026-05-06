@@ -41,6 +41,45 @@ uv sync --dev
 superintendent --help
 ```
 
+## Claude Code Skill
+
+Superintendent ships with a Claude Code skill that gives agents an always-current
+reference for the CLI. Three install paths:
+
+### In-repo (automatic)
+
+When working inside the superintendent repo, Claude Code auto-loads the skill from
+`.claude/skills/superintendent/`. No setup needed.
+
+### Global install (after `uv tool install`)
+
+```bash
+superintendent install-skill
+```
+
+Writes `SKILL.md`, `CLI_REFERENCE.md`, and `cli-reference.json` to
+`~/.claude/skills/superintendent/`. Re-run after `uv tool upgrade superintendent` to
+refresh the reference. Use `--target PATH` to install elsewhere; use `--force` to
+overwrite an existing install.
+
+### As a Claude Code plugin
+
+This repo ships a `.claude-plugin/plugin.json` so it can be installed directly as a
+plugin via `/plugin install` or by adding the repo as a marketplace source.
+
+### Regenerating the reference (contributors)
+
+The CLI reference is auto-generated from the typer app. After changing any CLI
+command or flag:
+
+```bash
+uv run superintendent docs regenerate
+```
+
+Then commit the updated files under
+`src/superintendent/docs/assets/skills/superintendent/`. CI catches drift via
+`tests/test_cli_reference.py`.
+
 ## Quick Start
 
 **Preview a workflow (dry-run):**

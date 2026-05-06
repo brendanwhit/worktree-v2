@@ -59,6 +59,8 @@ def _version_callback(value: bool) -> None:
 app = typer.Typer(name="superintendent", no_args_is_help=True)
 token_app = typer.Typer(name="token", help="Manage scoped GitHub tokens.")
 app.add_typer(token_app)
+docs_app = typer.Typer(name="docs", help="Generate and inspect CLI reference docs.")
+app.add_typer(docs_app)
 
 
 @app.callback()
@@ -73,6 +75,83 @@ def main(
     ),
 ) -> None:
     """Agent orchestration CLI for spawning autonomous Claude agents."""
+
+
+def _docs_target_dir() -> Path:
+    """Where docs regenerate writes. Override via env for tests."""
+    override = os.environ.get("SUPERINTENDENT_DOCS_TARGET")
+    if override:
+        return Path(override)
+    # Canonical location relative to this source file.
+    return (
+        Path(__file__).parent.parent / "docs" / "assets" / "skills" / "superintendent"
+    )
+
+
+@docs_app.command()
+def regenerate(
+    check: bool = typer.Option(False, "--check", help="Show diff without writing."),
+) -> None:
+    """Regenerate CLI_REFERENCE.md and cli-reference.json from the live CLI."""
+    from superintendent.docs import introspect, render
+
+    target = _docs_target_dir()
+    target.mkdir(parents=True, exist_ok=True)
+
+    tree = introspect.walk(app)
+    new_md = render.render_markdown(tree)
+    new_json = render.render_json(tree)
+
+    md_path = target / "CLI_REFERENCE.md"
+    json_path = target / "cli-reference.json"
+
+    if check:
+        drift = []
+        if not md_path.exists() or md_path.read_text() != new_md:
+            drift.append(str(md_path))
+        if not json_path.exists() or json_path.read_text() != new_json:
+            drift.append(str(json_path))
+        if drift:
+            typer.echo(f"Drift detected; would update: {', '.join(drift)}")
+            raise typer.Exit(code=1)
+        typer.echo("Up to date.")
+        return
+
+    md_path.write_text(new_md)
+    json_path.write_text(new_json)
+    typer.echo(f"Wrote {md_path}")
+    typer.echo(f"Wrote {json_path}")
+
+
+@app.command("install-skill")
+def install_skill(
+    target: Path = typer.Option(
+        None,
+        help="Target directory (defaults to ~/.claude/skills/superintendent).",
+    ),
+    force: bool = typer.Option(False, "--force", help="Overwrite existing files."),
+) -> None:
+    """Install the superintendent skill to a Claude Code skills directory."""
+    from importlib.resources import files
+
+    if target is None:
+        target = Path.home() / ".claude" / "skills" / "superintendent"
+
+    skill_dir = files("superintendent.docs") / "assets" / "skills" / "superintendent"
+    file_names = ("SKILL.md", "CLI_REFERENCE.md", "cli-reference.json")
+
+    if target.exists() and any((target / n).exists() for n in file_names) and not force:
+        typer.echo(
+            f"Error: target already contains skill files: {target}\n"
+            "Use --force to overwrite.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    target.mkdir(parents=True, exist_ok=True)
+    for name in file_names:
+        (target / name).write_text((skill_dir / name).read_text())
+        typer.echo(f"Wrote {target / name}")
 
 
 def get_default_registry() -> WorktreeRegistry:
